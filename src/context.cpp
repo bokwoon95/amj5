@@ -5,16 +5,24 @@
 #include <stop_token>
 #include <system_error>
 
+#include "errors.hpp"
+
 namespace amj {
 
-std::error_code Context::errorCode() const {
+std::optional<amj::Error> Context::error() const {
     if (cancellation.stop_requested()) {
-        return std::make_error_code(std::errc::operation_canceled);
+        return amj::Error{
+            .errorCode = std::make_error_code(std::errc::operation_canceled),
+            .errorMessage = "context canceled",
+        };
     }
     if (deadline.has_value() && std::chrono::steady_clock::now() >= deadline.value()) {
-        return std::make_error_code(std::errc::timed_out);
+        return amj::Error{
+            .errorCode = std::make_error_code(std::errc::timed_out),
+            .errorMessage = "context deadline exceeded",
+        };
     }
-    return std::error_code();
+    return std::nullopt;
 }
 
 } // namespace amj

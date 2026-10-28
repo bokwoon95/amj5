@@ -1,13 +1,15 @@
 #include <chrono>
 #include <gtest/gtest.h>
+#include <optional>
 #include <stop_token>
 #include <system_error>
 
 #include "context.hpp"
+#include "errors.hpp"
 
 TEST(Context, DefaultHasNoError) {
     const amj::Context ctx;
-    EXPECT_TRUE(!ctx.errorCode());
+    EXPECT_FALSE(ctx.error().has_value());
 }
 
 TEST(Context, ExpiredDeadlineTimesOut) {
@@ -15,7 +17,15 @@ TEST(Context, ExpiredDeadlineTimesOut) {
         .cancellation = std::stop_token(),
         .deadline = std::chrono::steady_clock::now(),
     };
-    EXPECT_EQ(ctx.errorCode(), std::make_error_code(std::errc::timed_out));
+    const std::optional<amj::Error> errorResult = ctx.error();
+    if (!errorResult.has_value()) {
+        FAIL() << "expected a context error";
+        return;
+    }
+    const amj::Error& error = errorResult.value();
+    EXPECT_EQ(error.errorCode, std::make_error_code(std::errc::timed_out));
+    EXPECT_EQ(error.errorMessage, "context deadline exceeded");
+    EXPECT_TRUE(error.stacktrace.empty());
 }
 
 TEST(Context, CancellationTakesPrecedenceOverTimeout) {
@@ -25,5 +35,13 @@ TEST(Context, CancellationTakesPrecedenceOverTimeout) {
         .deadline = std::chrono::steady_clock::now(),
     };
     stopSource.request_stop();
-    EXPECT_EQ(ctx.errorCode(), std::make_error_code(std::errc::operation_canceled));
+    const std::optional<amj::Error> errorResult = ctx.error();
+    if (!errorResult.has_value()) {
+        FAIL() << "expected a context error";
+        return;
+    }
+    const amj::Error& error = errorResult.value();
+    EXPECT_EQ(error.errorCode, std::make_error_code(std::errc::operation_canceled));
+    EXPECT_EQ(error.errorMessage, "context canceled");
+    EXPECT_TRUE(error.stacktrace.empty());
 }

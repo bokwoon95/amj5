@@ -1,5 +1,5 @@
-#include <gtest/gtest.h>
 #include <any>
+#include <gtest/gtest.h>
 #include <memory>
 #include <string>
 #include <system_error>
@@ -8,7 +8,7 @@
 
 TEST(Errors, DefaultHasNoCode) {
     const amj::Error error;
-    EXPECT_FALSE(static_cast<bool>(error.errorCode));
+    EXPECT_TRUE(!error.errorCode);
     EXPECT_TRUE(error.stacktrace.empty());
 }
 
