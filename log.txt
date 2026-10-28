@@ -1,10 +1,1 @@
- pi --session 01a181c8-32ca-71db-8e49-0cf90837c45c
-
- Start with ~/Documents/amj4/src/javascript/class_id.hpp → src/javascript/class_id.hpp.
-
- It has no project dependencies—only QuickJS and the standard library—and manages per-runtime native class IDs. It’s required by console, timeout, fetch,
- URL, and localStorage implementations.
-
- Then port callback_scheduler.hpp + .cpp, another independent foundation required by timeout and fetch.
-
- Those two foundations let you port the remaining JavaScript modules without depending on files you haven’t ported yet.
+TODO: make context::Context compose well with other context::Context types, just like in Go.
