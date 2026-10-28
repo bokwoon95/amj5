@@ -54,12 +54,12 @@ SecretSchema makeSchema() {
 amj::Error makeError(GError* error) {
     if (error == nullptr) {
         return amj::Error{
-            .errorCode = amj::keyring::ErrorCode::NotFound,
+            .errorCode = ErrorCode::NotFound,
             .errorMessage = "Secret not found.",
         };
     }
     amj::Error result = {
-        .errorCode = amj::keyring::ErrorCode::GenericError,
+        .errorCode = ErrorCode::GenericError,
         .errorMessage = error->message,
         .detail = error->code,
     };
@@ -82,7 +82,7 @@ std::expected<void, amj::Error> save(const std::string& service, const std::stri
     }
     if (stored == 0) {
         return std::unexpected(amj::Error{
-            .errorCode = amj::keyring::ErrorCode::GenericError,
+            .errorCode = ErrorCode::GenericError,
             .errorMessage = "Failed to store secret.",
         });
     }
@@ -118,12 +118,12 @@ std::expected<bool, amj::Error> isAvailable() {
             g_object_unref(service);
         }
         amj::Error result = {
-            .errorCode = amj::keyring::ErrorCode::Unavailable,
+            .errorCode = ErrorCode::Unavailable,
             .errorMessage = "Secret Service unavailable",
         };
         if (error != nullptr) {
             result = makeError(error);
-            result.errorCode = amj::keyring::ErrorCode::Unavailable;
+            result.errorCode = ErrorCode::Unavailable;
         }
         return std::unexpected(result);
     }

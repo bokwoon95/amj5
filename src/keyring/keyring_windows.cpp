@@ -76,9 +76,9 @@ struct LocalData {
 
 amj::Error makeError(DWORD code) {
     amj::Error error;
-    error.errorCode = amj::keyring::ErrorCode::GenericError;
+    error.errorCode = ErrorCode::GenericError;
     if (code == ERROR_NOT_FOUND) {
-        error.errorCode = amj::keyring::ErrorCode::NotFound;
+        error.errorCode = ErrorCode::NotFound;
     }
     error.detail = static_cast<int>(code);
     error.errorMessage = "Windows error " + std::to_string(code);
@@ -138,7 +138,7 @@ std::expected<void, amj::Error> save(const std::string& service, const std::stri
     // DPAPI only adds overhead, so oversized plaintext cannot possibly fit.
     if (value.size() > maxEncryptedSize) {
         return std::unexpected(amj::Error{
-            .errorCode = amj::keyring::ErrorCode::SecretTooLong,
+            .errorCode = ErrorCode::SecretTooLong,
             .errorMessage = "Secret exceeds the 18,944-byte encrypted credential capacity",
         });
     }
@@ -160,13 +160,13 @@ std::expected<void, amj::Error> save(const std::string& service, const std::stri
         DATA_BLOB input = {};
         input.cbData = static_cast<DWORD>(value.size());
         input.pbData = secret.data();
-        amj::keyring::LocalData output;
+        LocalData output;
         if (CryptProtectData(&input, L"keyring encrypted data", nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &output.blob) == FALSE) {
             return std::unexpected(makeError(GetLastError()));
         }
         if (output.blob.cbData > maxEncryptedSize) {
             return std::unexpected(amj::Error{
-                .errorCode = amj::keyring::ErrorCode::SecretTooLong,
+                .errorCode = ErrorCode::SecretTooLong,
                 .errorMessage = "DPAPI-encrypted secret exceeds 18,944 bytes",
             });
         }
@@ -260,7 +260,7 @@ std::expected<std::string, amj::Error> load(const std::string& service, const st
     DATA_BLOB input = {};
     input.cbData = static_cast<DWORD>(data.size());
     input.pbData = data.data();
-    amj::keyring::LocalData output;
+    LocalData output;
     if (CryptUnprotectData(&input, nullptr, nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &output.blob) == FALSE) {
         return std::unexpected(makeError(GetLastError()));
     }

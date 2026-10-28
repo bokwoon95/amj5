@@ -9,15 +9,15 @@
 
 namespace amj {
 
-std::optional<amj::Error> Context::errorOption() const {
+std::optional<Error> Context::errorOption() const {
     if (cancellation.stop_requested()) {
-        return amj::Error{
+        return Error{
             .errorCode = std::make_error_code(std::errc::operation_canceled),
             .errorMessage = "context canceled",
         };
     }
     if (deadline.has_value() && std::chrono::steady_clock::now() >= deadline.value()) {
-        return amj::Error{
+        return Error{
             .errorCode = std::make_error_code(std::errc::timed_out),
             .errorMessage = "context deadline exceeded",
         };

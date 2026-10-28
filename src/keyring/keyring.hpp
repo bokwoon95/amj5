@@ -41,7 +41,7 @@ enum class ErrorCode : std::uint8_t {
     AccessDenied,
 };
 
-[[nodiscard]] std::error_code make_error_code(amj::keyring::ErrorCode errorCode);
+[[nodiscard]] std::error_code make_error_code(ErrorCode errorCode);
 
 // Native OS error numbers, when available, are retained as int in amj::Error::detail.
 

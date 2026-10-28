@@ -15,15 +15,15 @@ class ErrorCategory final : public std::error_category {
 
     std::string message(int value) const override {
         switch (value) {
-            case static_cast<int>(amj::keyring::ErrorCode::GenericError):
+            case static_cast<int>(ErrorCode::GenericError):
                 return "Credential store operation failed";
-            case static_cast<int>(amj::keyring::ErrorCode::NotFound):
+            case static_cast<int>(ErrorCode::NotFound):
                 return "Secret not found";
-            case static_cast<int>(amj::keyring::ErrorCode::Unavailable):
+            case static_cast<int>(ErrorCode::Unavailable):
                 return "Credential store unavailable";
-            case static_cast<int>(amj::keyring::ErrorCode::SecretTooLong):
+            case static_cast<int>(ErrorCode::SecretTooLong):
                 return "Secret exceeds credential store capacity";
-            case static_cast<int>(amj::keyring::ErrorCode::AccessDenied):
+            case static_cast<int>(ErrorCode::AccessDenied):
                 return "Credential store access denied";
             default:
                 return "Unknown keyring error";
@@ -33,8 +33,8 @@ class ErrorCategory final : public std::error_category {
 
 } // namespace
 
-std::error_code make_error_code(amj::keyring::ErrorCode errorCode) {
-    static const amj::keyring::ErrorCategory category;
+std::error_code make_error_code(ErrorCode errorCode) {
+    static const ErrorCategory category;
     return std::error_code(static_cast<int>(errorCode), category);
 }
 
