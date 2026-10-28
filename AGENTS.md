@@ -121,7 +121,7 @@ Prioritize memory safety, defined behavior, and predictable failure over micro-o
 - Document the relevant invariant and its enforcement whenever an unchecked operation is intentionally used.
 
 ## Namespaces and type names
-- Use unqualified project-defined type names within their declaring namespace, including anonymous namespaces nested within it. Anonymous namespaces do not count as additional namespace levels for this rule.
+- Use unqualified project-defined type names within their declaring namespace. This also applies in both directions between a namespace and its nested anonymous namespaces.
 - Everywhere else, qualify project-defined type names starting with `amj::`. Write `amj::provider::Provider`, not `provider::Provider` or `::amj::provider::Provider`. Types declared in enclosing or sibling named namespaces MUST be qualified.
 - Do not introduce type aliases or using-declarations merely to shorten qualified type names.
 - Namespaces MUST exactly mirror the directory structure beneath `src/`, with `amj` corresponding to `src/`. For example, types declared in `src/provider/openai/client.hpp` belong to `amj::provider::openai`.
