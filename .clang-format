@@ -29,13 +29,4 @@ SpacesInSquareBrackets: false
 
 # Import / Include Sorting (gofmt style)
 SortIncludes: CaseSensitive
-IncludeBlocks: Regroup
-IncludeCategories:
-  # C / C++ Standard Library headers <...>
-  - Regex:           '^<.*>'
-    Priority:        1
-    SortPriority:    1
-  # Project / Local headers "..."
-  - Regex:           '^".*"'
-    Priority:        2
-    SortPriority:    2
+IncludeBlocks: Preserve

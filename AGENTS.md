@@ -119,3 +119,22 @@ Prioritize memory safety, defined behavior, and predictable failure over micro-o
 - Do not replace checked operations with unchecked alternatives solely for presumed performance.
 - Permit unchecked operations only where invariants make them provably safe and a measured performance benefit justifies them.
 - Document the relevant invariant and its enforcement whenever an unchecked operation is intentionally used.
+
+## Namespaces and type names
+- Use unqualified project-defined type names within their declaring namespace, including anonymous namespaces nested within it. Anonymous namespaces do not count as additional namespace levels for this rule.
+- Everywhere else, qualify project-defined type names starting with `amj::`. Write `amj::provider::Provider`, not `provider::Provider` or `::amj::provider::Provider`. Types declared in enclosing or sibling named namespaces MUST be qualified.
+- Do not introduce type aliases or using-declarations merely to shorten qualified type names.
+- Namespaces MUST exactly mirror the directory structure beneath `src/`, with `amj` corresponding to `src/`. For example, types declared in `src/provider/openai/client.hpp` belong to `amj::provider::openai`.
+- Do not add namespace levels that have no corresponding directory, or omit namespace levels corresponding to directories.
+- Keep directory and namespace nesting shallow. If fully qualified type names become cumbersome, simplify the organization rather than hiding it behind aliases.
+
+## Header include order
+- Group `#include` directives into separate blocks in this order:
+    1. The source file’s corresponding header, alone (source files only).
+    2. Other project headers.
+    3. Third-party library headers.
+    4. Standard-library headers.
+    5. System/platform headers.
+- Separate blocks with exactly one blank line. Omit empty blocks.
+- Sort headers alphabetically within each block; never merge or reorder blocks.
+- When headers require a specific dependency order, preserve it using narrowly scoped `clang-format off/on` comments and explain why.

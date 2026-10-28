@@ -6,27 +6,30 @@
 
 #include "errors.hpp"
 
+namespace amj {
+namespace {
+
 TEST(Errors, DefaultHasNoCode) {
-    const amj::Error error;
+    const Error error;
     EXPECT_TRUE(!error.errorCode);
     EXPECT_TRUE(error.stacktrace.empty());
 }
 
 TEST(Errors, MatchesCauseWithoutOuterCode) {
     const std::error_code causeErrorCode = std::make_error_code(std::errc::invalid_argument);
-    const amj::Error causeError = {
+    const Error causeError = {
         .errorCode = causeErrorCode,
         .errorMessage = "invalid input",
         .detail = std::string("input detail"),
     };
-    const amj::Error error = {
+    const Error error = {
         .errorMessage = "operation failed",
-        .cause = std::make_shared<const amj::Error>(causeError),
+        .cause = std::make_shared<const Error>(causeError),
     };
     EXPECT_FALSE(static_cast<bool>(error.errorCode));
     EXPECT_TRUE(error.is(causeErrorCode));
     EXPECT_FALSE(error.is(std::make_error_code(std::errc::timed_out)));
-    const amj::Error* asError = error.as(causeErrorCode);
+    const Error* asError = error.as(causeErrorCode);
     ASSERT_EQ(asError, error.cause.get());
     ASSERT_NE(asError, nullptr);
     const std::string* detail = std::any_cast<std::string>(&asError->detail);
@@ -38,9 +41,9 @@ TEST(Errors, MatchesCauseWithoutOuterCode) {
 
 TEST(Errors, MatchesFirstCodeInChain) {
     const std::error_code errorCode = std::make_error_code(std::errc::invalid_argument);
-    const amj::Error error = {
+    const Error error = {
         .errorCode = errorCode,
-        .cause = std::make_shared<const amj::Error>(amj::Error{
+        .cause = std::make_shared<const Error>(Error{
             .errorCode = errorCode,
         }),
     };
@@ -50,16 +53,16 @@ TEST(Errors, MatchesFirstCodeInChain) {
 
 TEST(Errors, FormatsCodeWithoutMessage) {
     const std::error_code errorCode = std::make_error_code(std::errc::invalid_argument);
-    const amj::Error error = {
+    const Error error = {
         .errorCode = errorCode,
     };
     EXPECT_EQ(error.toString(), errorCode.message());
 }
 
 TEST(Errors, FormatsCauseStacktrace) {
-    const amj::Error error = {
+    const Error error = {
         .errorMessage = "operation failed",
-        .cause = std::make_shared<const amj::Error>(amj::Error{
+        .cause = std::make_shared<const Error>(Error{
             .errorMessage = "invalid input",
             .stacktrace = {{"input.cpp", 42, "parseInput"}},
         }),
@@ -68,7 +71,7 @@ TEST(Errors, FormatsCauseStacktrace) {
 }
 
 TEST(Errors, CapturesStacktrace) {
-    const amj::Error error = amj::withStackTrace(amj::Error{
+    const Error error = withStackTrace(Error{
         .errorMessage = "unexpected failure",
     });
     EXPECT_FALSE(error.stacktrace.empty());
@@ -77,19 +80,22 @@ TEST(Errors, CapturesStacktrace) {
 }
 
 TEST(Errors, PreservesExistingStacktrace) {
-    const amj::Error original = {
+    const Error original = {
         .errorMessage = "unexpected failure",
         .stacktrace = {{"input.cpp", 42, "parseInput"}},
     };
-    const amj::Error error = amj::withStackTrace(original);
+    const Error error = withStackTrace(original);
     EXPECT_EQ(error.stacktrace, original.stacktrace);
 
-    const amj::Error uncaptured = {
+    const Error uncaptured = {
         .errorMessage = "operation failed",
-        .cause = std::make_shared<const amj::Error>(original),
+        .cause = std::make_shared<const Error>(original),
     };
-    const amj::Error wrapper = amj::withStackTrace(uncaptured);
+    const Error wrapper = withStackTrace(uncaptured);
     EXPECT_TRUE(wrapper.stacktrace.empty());
     ASSERT_NE(wrapper.cause, nullptr);
     EXPECT_EQ(wrapper.cause->stacktrace, original.stacktrace);
 }
+
+} // namespace
+} // namespace amj
