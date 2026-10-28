@@ -1,0 +1,11 @@
+.DS_STORE
+/build/
+/vcpkg_installed/
+/dist/
+*.exe
+*.log
+/.venv/
+/.ruff_cache/
+/.cache/
+__pycache__/
+*.pyc

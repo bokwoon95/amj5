@@ -1,0 +1,38 @@
+Checks: >-
+  -*,
+  clang-diagnostic-missing-designated-field-initializers,
+  misc-const-correctness,
+  misc-include-cleaner,
+  misc-definitions-in-headers,
+  misc-unused-parameters,
+  misc-header-include-cycle,
+  misc-unused-using-decls,
+  bugprone-*,
+  clang-analyzer-*,
+  performance-*,
+  modernize-use-nullptr,
+  modernize-loop-convert,
+  modernize-make-unique,
+  modernize-make-shared,
+  modernize-replace-auto-ptr,
+  modernize-use-override,
+  modernize-use-equals-delete,
+  modernize-avoid-c-arrays,
+  modernize-use-default-member-init,
+  modernize-use-emplace,
+  readability-braces-around-statements,
+  readability-misleading-indentation,
+  readability-implicit-bool-conversion,
+  readability-isolate-declaration,
+  readability-inconsistent-declaration-parameter-name,
+  readability-redundant-smartptr-get,
+  readability-container-size-empty,
+  readability-qualified-auto,
+  readability-non-const-parameter
+ExtraArgsBefore:
+  - '-Wmissing-designated-field-initializers'
+WarningsAsErrors: '*'
+HeaderFilterRegex: '.*[/\\]src[/\\].*'
+CheckOptions:
+  # An earlier implicit reference must not hide a later explicit missing include.
+  misc-include-cleaner.DeduplicateFindings: false
