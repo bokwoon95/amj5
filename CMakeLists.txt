@@ -47,10 +47,41 @@ if(MSVC)
     include_directories(SYSTEM $ENV{INCLUDE})
 endif()
 
+# Use CMake's built-in Threads module for threading.
 find_package(Threads REQUIRED)
+
+# Select MSVC C/C++ runtime linkage; CMake generates the compiler flags.
+#
+# set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreadedDebugDLL) -> /MDd (dynamic debug
+# runtime, matching prebuilt Qt).
+#
+# set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded) -> /MT (static runtime, no MSVC
+# runtime DLLs to ship).
+if(MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:DebugDLL>")
+    if(ENABLE_ASAN_UBSAN)
+        # ASan is incompatible with /RTC checks and /ZI (Edit and Continue).
+        foreach(amj_language C CXX)
+            string(REGEX REPLACE "/RTC[^ ]*" "" CMAKE_${amj_language}_FLAGS_DEBUG "${CMAKE_${amj_language}_FLAGS_DEBUG}")
+            string(REPLACE "/ZI" "/Zi" CMAKE_${amj_language}_FLAGS_DEBUG "${CMAKE_${amj_language}_FLAGS_DEBUG}")
+        endforeach()
+    endif()
+endif()
+
+set(amj_libraries)
+set(amj_executables)
+
+## == src == ##
+
 add_library(amj_errors STATIC src/errors.cpp)
+list(APPEND amj_libraries amj_errors)
+
 add_library(amj_context STATIC src/context.cpp)
+list(APPEND amj_libraries amj_context)
 target_link_libraries(amj_context PRIVATE Threads::Threads)
+
+## == src/keyring == ##
+
 add_library(amj_keyring STATIC src/keyring/keyring.cpp)
 target_link_libraries(amj_keyring PUBLIC amj_errors)
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
@@ -75,23 +106,7 @@ foreach(amj_target IN LISTS amj_libraries)
     target_include_directories(${amj_target} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 endforeach()
 
-# Select MSVC C/C++ runtime linkage; CMake generates the compiler flags.
-#
-# set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreadedDebugDLL) -> /MDd (dynamic debug
-# runtime, matching prebuilt Qt).
-#
-# set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded) -> /MT (static runtime, no MSVC
-# runtime DLLs to ship).
-if(MSVC)
-    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:DebugDLL>")
-    if(ENABLE_ASAN_UBSAN)
-        # ASan is incompatible with /RTC checks and /ZI (Edit and Continue).
-        foreach(amj_language C CXX)
-            string(REGEX REPLACE "/RTC[^ ]*" "" CMAKE_${amj_language}_FLAGS_DEBUG "${CMAKE_${amj_language}_FLAGS_DEBUG}")
-            string(REPLACE "/ZI" "/Zi" CMAKE_${amj_language}_FLAGS_DEBUG "${CMAKE_${amj_language}_FLAGS_DEBUG}")
-        endforeach()
-    endif()
-endif()
+## == Tests == ##
 
 include(CTest)
 set(amj_targets ${amj_libraries})
@@ -99,8 +114,8 @@ if(BUILD_TESTING)
     find_package(GTest CONFIG REQUIRED)
     include(GoogleTest)
     # Tests are built explicitly by scripts/test.ps1, not by the default build.
-    add_executable(amj_tests EXCLUDE_FROM_ALL src/errors_test.cpp src/context_test.cpp)
-    target_link_libraries(amj_tests PRIVATE amj_errors amj_context Threads::Threads GTest::gtest_main)
+    add_executable(amj_tests EXCLUDE_FROM_ALL src/errors_test.cpp src/context_test.cpp src/keyring/keyring_test.cpp)
+    target_link_libraries(amj_tests PRIVATE amj_errors amj_context amj_keyring Threads::Threads GTest::gtest_main)
     set_target_properties(amj_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<0:>")
     gtest_discover_tests(amj_tests DISCOVERY_MODE PRE_TEST)
     list(APPEND amj_targets amj_tests)
