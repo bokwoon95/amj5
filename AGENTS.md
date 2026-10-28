@@ -122,12 +122,25 @@ Prioritize memory safety, defined behavior, and predictable failure over micro-o
 - Document the relevant invariant and its enforcement whenever an unchecked operation is intentionally used.
 
 ## Namespaces and type names
-- Use unqualified project-defined type names within their declaring namespace. This also applies in both directions between a namespace and its nested anonymous namespaces.
-- Everywhere else, qualify project-defined type names starting with `amj::`. Write `amj::provider::Provider`, not `provider::Provider` or `::amj::provider::Provider`. Types declared in enclosing or sibling named namespaces MUST be qualified.
-- Do not introduce type aliases or using-declarations merely to shorten qualified type names.
+- Use unqualified project-defined names within their declaring namespace. This also applies in both directions between a namespace and its nested anonymous namespaces.
+- Outside their declaring namespace, qualify functions, types, and other namespace members with exactly one namespace qualifier, using the namespace’s basename. Write `provider::Provider`, `errors::Error`, and `context::Context`, not `amj::provider::Provider` or unqualified imported names. Members declared in enclosing or sibling named namespaces MUST also be qualified.
+- Declare namespace aliases at the beginning of the namespace body, before other declarations, whenever the namespace would otherwise require multiple qualification levels. Alias names MUST match the target namespace’s basename. This applies to project and external namespaces alike:
+```cpp
+namespace amj::example {
+namespace filesystem = std::filesystem;
+namespace chrono = std::chrono;
+namespace ranges = std::ranges;
+namespace errors = amj::errors;
+namespace context = amj::context;
+namespace keyring = amj::keyring;
+namespace provider = amj::provider;
+}
+```
+- Namespace declarations and namespace-alias targets may use fully qualified namespace paths; references to namespace members MUST use at most one namespace qualifier. For example, use std::vector and filesystem::path, not std::filesystem::path.
+- Do not introduce type aliases, using-declarations, or using-directives merely to shorten names. Use namespace aliases instead.
 - Namespaces MUST exactly mirror the directory structure beneath `src/`, with `amj` corresponding to `src/`. For example, types declared in `src/provider/openai/client.hpp` belong to `amj::provider::openai`.
 - Do not add namespace levels that have no corresponding directory, or omit namespace levels corresponding to directories.
-- Keep directory and namespace nesting shallow. If fully qualified type names become cumbersome, simplify the organization rather than hiding it behind aliases.
+- Namespace basenames MUST be unique across the codebase, regardless of their parent namespace or directory. Choose distinct basenames so namespace aliases never collide.
 
 ## Header include order
 - Group `#include` directives into separate blocks in this order:
