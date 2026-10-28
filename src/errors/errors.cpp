@@ -8,7 +8,7 @@
 #include <system_error>
 #include <tuple>
 
-namespace amj {
+namespace amj::errors {
 
 bool Error::is(std::error_code targetErrorCode) const {
     return as(targetErrorCode) != nullptr;
@@ -65,4 +65,4 @@ Error withStackTrace(Error error) {
     return error;
 }
 
-} // namespace amj
+} // namespace amj::errors

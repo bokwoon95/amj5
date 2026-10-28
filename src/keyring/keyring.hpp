@@ -23,7 +23,7 @@
 
 #pragma once
 
-#include "errors.hpp"
+#include "errors/errors.hpp"
 
 #include <cstdint>
 #include <expected>
@@ -32,6 +32,7 @@
 #include <type_traits>
 
 namespace amj::keyring {
+namespace errors = amj::errors;
 
 enum class ErrorCode : std::uint8_t {
     GenericError = 1,
@@ -43,7 +44,7 @@ enum class ErrorCode : std::uint8_t {
 
 [[nodiscard]] std::error_code make_error_code(ErrorCode errorCode);
 
-// Native OS error numbers, when available, are retained as int in amj::Error::detail.
+// Native OS error numbers, when available, are retained as int in errors::Error::detail.
 
 // These operations never acquire application locks. Cooperating callers must use
 // the same canonical lock name for each (service, user) identity, holding
@@ -52,26 +53,28 @@ enum class ErrorCode : std::uint8_t {
 // Blocking operations; unlocking the OS credential store may require user interaction.
 // Namespace service names to avoid collisions with other applications.
 // A missing entry reports NotFound; an empty secret is a successful empty string.
-[[nodiscard]] std::expected<std::string, amj::Error> load(const std::string& service, const std::string& user);
+[[nodiscard]] std::expected<std::string, errors::Error> load(const std::string& service, const std::string& user);
 
 // Inserts or overwrites an entry. Windows stores values up to 2,560 bytes directly
 // in Credential Manager; larger values are DPAPI-encrypted and split across the
 // blob and attributes. Ciphertext must fit within 18,944 bytes (plaintext less).
 // Linux retains libsecret's UTF-8, NUL-terminated secret text semantics.
-[[nodiscard]] std::expected<void, amj::Error> save(const std::string& service, const std::string& user, const std::string& value);
+[[nodiscard]] std::expected<void, errors::Error> save(const std::string& service, const std::string& user, const std::string& value);
 
 // Deleting a missing entry reports NotFound.
-[[nodiscard]] std::expected<void, amj::Error> remove(const std::string& service, const std::string& user);
+[[nodiscard]] std::expected<void, errors::Error> remove(const std::string& service, const std::string& user);
 
 // Probes the native Linux/macOS credential service. Windows Credential Manager is a
 // built-in component, so availability always returns true there.
-[[nodiscard]] std::expected<bool, amj::Error> isAvailable();
+[[nodiscard]] std::expected<bool, errors::Error> isAvailable();
 
 } // namespace amj::keyring
+
+namespace keyring = amj::keyring;
 
 namespace std {
 
 template <>
-struct is_error_code_enum<amj::keyring::ErrorCode> : true_type {};
+struct is_error_code_enum<keyring::ErrorCode> : true_type {};
 
 } // namespace std

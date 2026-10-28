@@ -1,23 +1,25 @@
 #include "context.hpp"
 
-#include "errors.hpp"
+#include "errors/errors.hpp"
 
 #include <chrono>
 #include <optional>
 #include <stop_token>
 #include <system_error>
 
-namespace amj {
+namespace amj::context {
+namespace chrono = std::chrono;
+namespace errors = amj::errors;
 
-std::optional<Error> Context::errorOption() const {
+std::optional<errors::Error> Context::errorOption() const {
     if (cancellation.stop_requested()) {
-        return Error{
+        return errors::Error{
             .errorCode = std::make_error_code(std::errc::operation_canceled),
             .errorMessage = "context canceled",
         };
     }
-    if (deadline.has_value() && std::chrono::steady_clock::now() >= deadline.value()) {
-        return Error{
+    if (deadline.has_value() && chrono::steady_clock::now() >= deadline.value()) {
+        return errors::Error{
             .errorCode = std::make_error_code(std::errc::timed_out),
             .errorMessage = "context deadline exceeded",
         };
@@ -25,4 +27,4 @@ std::optional<Error> Context::errorOption() const {
     return std::nullopt;
 }
 
-} // namespace amj
+} // namespace amj::context

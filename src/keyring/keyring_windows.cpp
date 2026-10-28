@@ -26,7 +26,7 @@
 
 #include "keyring.hpp"
 
-#include "errors.hpp"
+#include "errors/errors.hpp"
 
 #include <algorithm>
 #include <array>
@@ -53,6 +53,7 @@
 // clang-format on
 
 namespace amj::keyring {
+namespace errors = amj::errors;
 
 namespace {
 
@@ -74,8 +75,8 @@ struct LocalData {
     LocalData& operator=(const LocalData&) = delete;
 };
 
-amj::Error makeError(DWORD code) {
-    amj::Error error;
+errors::Error makeError(DWORD code) {
+    errors::Error error;
     error.errorCode = ErrorCode::GenericError;
     if (code == ERROR_NOT_FOUND) {
         error.errorCode = ErrorCode::NotFound;
@@ -91,7 +92,7 @@ amj::Error makeError(DWORD code) {
     return error;
 }
 
-std::expected<std::wstring, amj::Error> utf8ToWide(const std::string& value) {
+std::expected<std::wstring, errors::Error> utf8ToWide(const std::string& value) {
     if (value.find('\0') != std::string::npos || value.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
         return std::unexpected(makeError(ERROR_INVALID_PARAMETER));
     }
@@ -110,13 +111,13 @@ std::expected<std::wstring, amj::Error> utf8ToWide(const std::string& value) {
     return result;
 }
 
-std::expected<std::wstring, amj::Error> makeTargetName(const std::string& service, const std::string& user) {
-    std::expected<std::wstring, amj::Error> targetResult = utf8ToWide(service + "/" + user);
+std::expected<std::wstring, errors::Error> makeTargetName(const std::string& service, const std::string& user) {
+    std::expected<std::wstring, errors::Error> targetResult = utf8ToWide(service + "/" + user);
     if (!targetResult.has_value()) {
         return std::unexpected(targetResult.error());
     }
     if (targetResult.value().size() > CRED_MAX_GENERIC_TARGET_NAME_LENGTH) {
-        amj::Error error = makeError(ERROR_INVALID_PARAMETER);
+        errors::Error error = makeError(ERROR_INVALID_PARAMETER);
         error.errorMessage = "Credential target name too long";
         return std::unexpected(error);
     }
@@ -126,18 +127,18 @@ std::expected<std::wstring, amj::Error> makeTargetName(const std::string& servic
 } // namespace
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): Parameter ordering is defined by the public keyring API.
-std::expected<void, amj::Error> save(const std::string& service, const std::string& user, const std::string& value) {
-    std::expected<std::wstring, amj::Error> targetResult = makeTargetName(service, user);
+std::expected<void, errors::Error> save(const std::string& service, const std::string& user, const std::string& value) {
+    std::expected<std::wstring, errors::Error> targetResult = makeTargetName(service, user);
     if (!targetResult.has_value()) {
         return std::unexpected(targetResult.error());
     }
-    std::expected<std::wstring, amj::Error> usernameResult = utf8ToWide(user);
+    std::expected<std::wstring, errors::Error> usernameResult = utf8ToWide(user);
     if (!usernameResult.has_value()) {
         return std::unexpected(usernameResult.error());
     }
     // DPAPI only adds overhead, so oversized plaintext cannot possibly fit.
     if (value.size() > maxEncryptedSize) {
-        return std::unexpected(amj::Error{
+        return std::unexpected(errors::Error{
             .errorCode = ErrorCode::SecretTooLong,
             .errorMessage = "Secret exceeds the 18,944-byte encrypted credential capacity",
         });
@@ -165,7 +166,7 @@ std::expected<void, amj::Error> save(const std::string& service, const std::stri
             return std::unexpected(makeError(GetLastError()));
         }
         if (output.blob.cbData > maxEncryptedSize) {
-            return std::unexpected(amj::Error{
+            return std::unexpected(errors::Error{
                 .errorCode = ErrorCode::SecretTooLong,
                 .errorMessage = "DPAPI-encrypted secret exceeds 18,944 bytes",
             });
@@ -200,8 +201,8 @@ std::expected<void, amj::Error> save(const std::string& service, const std::stri
     return {};
 }
 
-std::expected<std::string, amj::Error> load(const std::string& service, const std::string& user) {
-    const std::expected<std::wstring, amj::Error> targetResult = makeTargetName(service, user);
+std::expected<std::string, errors::Error> load(const std::string& service, const std::string& user) {
+    const std::expected<std::wstring, errors::Error> targetResult = makeTargetName(service, user);
     if (!targetResult.has_value()) {
         return std::unexpected(targetResult.error());
     }
@@ -274,8 +275,8 @@ std::expected<std::string, amj::Error> load(const std::string& service, const st
     return std::string(plaintext.begin(), plaintext.end());
 }
 
-std::expected<void, amj::Error> remove(const std::string& service, const std::string& user) {
-    const std::expected<std::wstring, amj::Error> targetResult = makeTargetName(service, user);
+std::expected<void, errors::Error> remove(const std::string& service, const std::string& user) {
+    const std::expected<std::wstring, errors::Error> targetResult = makeTargetName(service, user);
     if (!targetResult.has_value()) {
         return std::unexpected(targetResult.error());
     }
@@ -285,7 +286,7 @@ std::expected<void, amj::Error> remove(const std::string& service, const std::st
     return {};
 }
 
-std::expected<bool, amj::Error> isAvailable() {
+std::expected<bool, errors::Error> isAvailable() {
     return true;
 }
 

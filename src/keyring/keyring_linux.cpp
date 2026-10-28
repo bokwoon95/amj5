@@ -27,7 +27,7 @@
 
 #include "keyring.hpp"
 
-#include "errors.hpp"
+#include "errors/errors.hpp"
 
 #include <libsecret/secret.h>
 
@@ -36,6 +36,7 @@
 #include <string>
 
 namespace amj::keyring {
+namespace errors = amj::errors;
 
 namespace {
 
@@ -51,14 +52,14 @@ SecretSchema makeSchema() {
     return schema;
 }
 
-amj::Error makeError(GError* error) {
+errors::Error makeError(GError* error) {
     if (error == nullptr) {
-        return amj::Error{
+        return errors::Error{
             .errorCode = ErrorCode::NotFound,
             .errorMessage = "Secret not found.",
         };
     }
-    amj::Error result = {
+    errors::Error result = {
         .errorCode = ErrorCode::GenericError,
         .errorMessage = error->message,
         .detail = error->code,
@@ -69,7 +70,7 @@ amj::Error makeError(GError* error) {
 
 } // namespace
 
-std::expected<void, amj::Error> save(const std::string& service, const std::string& user, const std::string& value) {
+std::expected<void, errors::Error> save(const std::string& service, const std::string& user, const std::string& value) {
     const SecretSchema schema = makeSchema();
     std::string label = service;
     if (!user.empty()) {
@@ -81,7 +82,7 @@ std::expected<void, amj::Error> save(const std::string& service, const std::stri
         return std::unexpected(makeError(error));
     }
     if (stored == 0) {
-        return std::unexpected(amj::Error{
+        return std::unexpected(errors::Error{
             .errorCode = ErrorCode::GenericError,
             .errorMessage = "Failed to store secret.",
         });
@@ -89,7 +90,7 @@ std::expected<void, amj::Error> save(const std::string& service, const std::stri
     return {};
 }
 
-std::expected<std::string, amj::Error> load(const std::string& service, const std::string& user) {
+std::expected<std::string, errors::Error> load(const std::string& service, const std::string& user) {
     const SecretSchema schema = makeSchema();
     GError* error = nullptr;
     gchar* rawSecret = secret_password_lookup_sync(&schema, nullptr, &error, "service", service.c_str(), "username", user.c_str(), nullptr);
@@ -100,7 +101,7 @@ std::expected<std::string, amj::Error> load(const std::string& service, const st
     return std::string(rawSecret);
 }
 
-std::expected<void, amj::Error> remove(const std::string& service, const std::string& user) {
+std::expected<void, errors::Error> remove(const std::string& service, const std::string& user) {
     const SecretSchema schema = makeSchema();
     GError* error = nullptr;
     const gboolean deleted = secret_password_clear_sync(&schema, nullptr, &error, "service", service.c_str(), "username", user.c_str(), nullptr);
@@ -110,14 +111,14 @@ std::expected<void, amj::Error> remove(const std::string& service, const std::st
     return {};
 }
 
-std::expected<bool, amj::Error> isAvailable() {
+std::expected<bool, errors::Error> isAvailable() {
     GError* error = nullptr;
     SecretService* service = secret_service_get_sync(SECRET_SERVICE_NONE, nullptr, &error);
     if (error != nullptr || service == nullptr) {
         if (service != nullptr) {
             g_object_unref(service);
         }
-        amj::Error result = {
+        errors::Error result = {
             .errorCode = ErrorCode::Unavailable,
             .errorMessage = "Secret Service unavailable",
         };

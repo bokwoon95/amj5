@@ -28,7 +28,7 @@
 
 #include "keyring.hpp"
 
-#include "errors.hpp"
+#include "errors/errors.hpp"
 
 #include <cstddef>
 #include <expected>
@@ -47,6 +47,7 @@
 #include <Security/SecItem.h>
 
 namespace amj::keyring {
+namespace errors = amj::errors;
 
 namespace {
 
@@ -66,8 +67,8 @@ struct ScopedCFRef {
     ScopedCFRef& operator=(const ScopedCFRef&) = delete;
 };
 
-amj::Error makeError(OSStatus status) {
-    amj::Error error;
+errors::Error makeError(OSStatus status) {
+    errors::Error error;
     error.detail = static_cast<int>(status);
     error.errorCode = ErrorCode::GenericError;
     if (status == errSecItemNotFound) {
@@ -94,7 +95,7 @@ amj::Error makeError(OSStatus status) {
 
 // Returns an owned dictionary under Core Foundation's Create rule.
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): Matches the public keyring API's service/user ordering.
-std::expected<CFMutableDictionaryRef, amj::Error> createQuery(const std::string& service, const std::string& user) {
+std::expected<CFMutableDictionaryRef, errors::Error> createQuery(const std::string& service, const std::string& user) {
     const ScopedCFRef<CFStringRef> cfService(CFStringCreateWithCString(kCFAllocatorDefault, service.c_str(), kCFStringEncodingUTF8));
     const ScopedCFRef<CFStringRef> cfUser(CFStringCreateWithCString(kCFAllocatorDefault, user.c_str(), kCFStringEncodingUTF8));
     CFMutableDictionaryRef query = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
@@ -102,7 +103,7 @@ std::expected<CFMutableDictionaryRef, amj::Error> createQuery(const std::string&
         if (query != nullptr) {
             CFRelease(query);
         }
-        return std::unexpected(amj::Error{
+        return std::unexpected(errors::Error{
             .errorCode = ErrorCode::GenericError,
             .errorMessage = "Failed to create credential query",
         });
@@ -116,14 +117,14 @@ std::expected<CFMutableDictionaryRef, amj::Error> createQuery(const std::string&
 } // namespace
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): Parameter ordering is defined by the public keyring API.
-std::expected<void, amj::Error> save(const std::string& service, const std::string& user, const std::string& value) {
-    const std::expected<CFMutableDictionaryRef, amj::Error> queryResult = createQuery(service, user);
+std::expected<void, errors::Error> save(const std::string& service, const std::string& user, const std::string& value) {
+    const std::expected<CFMutableDictionaryRef, errors::Error> queryResult = createQuery(service, user);
     if (!queryResult.has_value()) {
         return std::unexpected(queryResult.error());
     }
     const ScopedCFRef<CFMutableDictionaryRef> query(queryResult.value());
     if (value.size() > static_cast<std::size_t>(std::numeric_limits<CFIndex>::max())) {
-        return std::unexpected(amj::Error{
+        return std::unexpected(errors::Error{
             .errorCode = ErrorCode::GenericError,
             .errorMessage = "Secret too long",
         });
@@ -131,7 +132,7 @@ std::expected<void, amj::Error> save(const std::string& service, const std::stri
     const std::vector<UInt8> secret(value.begin(), value.end());
     const ScopedCFRef<CFDataRef> data(CFDataCreate(kCFAllocatorDefault, secret.data(), static_cast<CFIndex>(secret.size())));
     if (data.value == nullptr) {
-        return std::unexpected(amj::Error{
+        return std::unexpected(errors::Error{
             .errorCode = ErrorCode::GenericError,
             .errorMessage = "Failed to create secret data",
         });
@@ -142,7 +143,7 @@ std::expected<void, amj::Error> save(const std::string& service, const std::stri
         CFDictionaryRemoveValue(query.value, kSecValueData);
         const ScopedCFRef<CFMutableDictionaryRef> attributes(CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
         if (attributes.value == nullptr) {
-            return std::unexpected(amj::Error{
+            return std::unexpected(errors::Error{
                 .errorCode = ErrorCode::GenericError,
                 .errorMessage = "Failed to create secret attributes",
             });
@@ -156,8 +157,8 @@ std::expected<void, amj::Error> save(const std::string& service, const std::stri
     return {};
 }
 
-std::expected<std::string, amj::Error> load(const std::string& service, const std::string& user) {
-    const std::expected<CFMutableDictionaryRef, amj::Error> queryResult = createQuery(service, user);
+std::expected<std::string, errors::Error> load(const std::string& service, const std::string& user) {
+    const std::expected<CFMutableDictionaryRef, errors::Error> queryResult = createQuery(service, user);
     if (!queryResult.has_value()) {
         return std::unexpected(queryResult.error());
     }
@@ -170,7 +171,7 @@ std::expected<std::string, amj::Error> load(const std::string& service, const st
         return std::unexpected(makeError(status));
     }
     if (result == nullptr || CFGetTypeID(result) != CFDataGetTypeID()) {
-        return std::unexpected(amj::Error{
+        return std::unexpected(errors::Error{
             .errorCode = ErrorCode::GenericError,
             .errorMessage = "Invalid secret data type",
         });
@@ -182,7 +183,7 @@ std::expected<std::string, amj::Error> load(const std::string& service, const st
     }
     const UInt8* bytes = CFDataGetBytePtr(data);
     if (length < 0 || bytes == nullptr) {
-        return std::unexpected(amj::Error{
+        return std::unexpected(errors::Error{
             .errorCode = ErrorCode::GenericError,
             .errorMessage = "Invalid secret data buffer",
         });
@@ -191,8 +192,8 @@ std::expected<std::string, amj::Error> load(const std::string& service, const st
     return std::string(plaintext.begin(), plaintext.end());
 }
 
-std::expected<void, amj::Error> remove(const std::string& service, const std::string& user) {
-    const std::expected<CFMutableDictionaryRef, amj::Error> queryResult = createQuery(service, user);
+std::expected<void, errors::Error> remove(const std::string& service, const std::string& user) {
+    const std::expected<CFMutableDictionaryRef, errors::Error> queryResult = createQuery(service, user);
     if (!queryResult.has_value()) {
         return std::unexpected(queryResult.error());
     }
@@ -204,10 +205,10 @@ std::expected<void, amj::Error> remove(const std::string& service, const std::st
     return {};
 }
 
-std::expected<bool, amj::Error> isAvailable() {
-    const std::expected<CFMutableDictionaryRef, amj::Error> queryResult = createQuery("keyring.availability_check_service", "availability_check_account");
+std::expected<bool, errors::Error> isAvailable() {
+    const std::expected<CFMutableDictionaryRef, errors::Error> queryResult = createQuery("keyring.availability_check_service", "availability_check_account");
     if (!queryResult.has_value()) {
-        amj::Error error = queryResult.error();
+        errors::Error error = queryResult.error();
         error.errorCode = ErrorCode::Unavailable;
         return std::unexpected(error);
     }
@@ -217,7 +218,7 @@ std::expected<bool, amj::Error> isAvailable() {
     if (status == errSecSuccess || status == errSecItemNotFound) {
         return true;
     }
-    amj::Error error = makeError(status);
+    errors::Error error = makeError(status);
     error.errorCode = ErrorCode::Unavailable;
     return std::unexpected(error);
 }

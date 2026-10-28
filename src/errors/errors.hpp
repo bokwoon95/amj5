@@ -8,7 +8,7 @@
 #include <tuple>
 #include <vector>
 
-namespace amj {
+namespace amj::errors {
 
 // All modules share this type. Module-specific enums use their own error
 // categories; detail may hold any copyable module-specific error struct.
@@ -37,4 +37,4 @@ struct Error {
 // Source locations require debug symbols. Capture/formatting may throw.
 [[nodiscard]] Error withStackTrace(Error error);
 
-} // namespace amj
+} // namespace amj::errors

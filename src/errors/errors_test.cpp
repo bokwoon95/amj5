@@ -7,7 +7,7 @@
 #include <string>
 #include <system_error>
 
-namespace amj {
+namespace amj::errors {
 namespace {
 
 TEST(Errors, DefaultHasNoCode) {
@@ -99,4 +99,4 @@ TEST(Errors, PreservesExistingStacktrace) {
 }
 
 } // namespace
-} // namespace amj
+} // namespace amj::errors

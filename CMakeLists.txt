@@ -80,22 +80,24 @@ set(amj_test_libraries)
 set(amj_test_sources)
 set(amj_test_filters)
 
-## == src == ##
+## == src/errors == ##
 
-add_library(amj_errors STATIC src/errors.cpp)
+add_library(amj_errors STATIC src/errors/errors.cpp)
 target_link_libraries(amj_errors PRIVATE cpptrace::cpptrace)
 list(APPEND amj_libraries amj_errors)
 if(BUILD_TESTING)
     list(APPEND amj_test_libraries amj_errors)
-    list(APPEND amj_test_sources src/errors_test.cpp)
+    list(APPEND amj_test_sources src/errors/errors_test.cpp)
 endif()
 
-add_library(amj_context STATIC src/context.cpp)
+## == src/context == ##
+
+add_library(amj_context STATIC src/context/context.cpp)
 list(APPEND amj_libraries amj_context)
-target_link_libraries(amj_context PRIVATE Threads::Threads)
+target_link_libraries(amj_context PUBLIC amj_errors PRIVATE Threads::Threads)
 if(BUILD_TESTING)
     list(APPEND amj_test_libraries amj_context Threads::Threads)
-    list(APPEND amj_test_sources src/context_test.cpp)
+    list(APPEND amj_test_sources src/context/context_test.cpp)
 endif()
 
 ## == src/keyring == ##

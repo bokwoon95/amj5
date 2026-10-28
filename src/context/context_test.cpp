@@ -1,6 +1,6 @@
 #include "context.hpp"
 
-#include "errors.hpp"
+#include "errors/errors.hpp"
 
 #include <gtest/gtest.h>
 
@@ -9,7 +9,9 @@
 #include <stop_token>
 #include <system_error>
 
-namespace amj {
+namespace amj::context {
+namespace chrono = std::chrono;
+namespace errors = amj::errors;
 namespace {
 
 TEST(Context, DefaultHasNoError) {
@@ -20,14 +22,14 @@ TEST(Context, DefaultHasNoError) {
 TEST(Context, ExpiredDeadlineTimesOut) {
     const Context context = {
         .cancellation = std::stop_token(),
-        .deadline = std::chrono::steady_clock::now(),
+        .deadline = chrono::steady_clock::now(),
     };
-    const std::optional<Error> errorOption = context.errorOption();
+    const std::optional<errors::Error> errorOption = context.errorOption();
     if (!errorOption.has_value()) {
         FAIL() << "expected a context error";
         return;
     }
-    const Error& error = errorOption.value();
+    const errors::Error& error = errorOption.value();
     EXPECT_EQ(error.errorCode, std::make_error_code(std::errc::timed_out));
     EXPECT_EQ(error.errorMessage, "context deadline exceeded");
     EXPECT_TRUE(error.stacktrace.empty());
@@ -37,19 +39,19 @@ TEST(Context, CancellationTakesPrecedenceOverTimeout) {
     std::stop_source stopSource;
     const Context context = {
         .cancellation = stopSource.get_token(),
-        .deadline = std::chrono::steady_clock::now(),
+        .deadline = chrono::steady_clock::now(),
     };
     stopSource.request_stop();
-    const std::optional<Error> errorOption = context.errorOption();
+    const std::optional<errors::Error> errorOption = context.errorOption();
     if (!errorOption.has_value()) {
         FAIL() << "expected a context error";
         return;
     }
-    const Error& error = errorOption.value();
+    const errors::Error& error = errorOption.value();
     EXPECT_EQ(error.errorCode, std::make_error_code(std::errc::operation_canceled));
     EXPECT_EQ(error.errorMessage, "context canceled");
     EXPECT_TRUE(error.stacktrace.empty());
 }
 
 } // namespace
-} // namespace amj
+} // namespace amj::context
