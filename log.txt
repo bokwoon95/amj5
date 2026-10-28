@@ -14,3 +14,7 @@ amj::isError()
 amj::asError()
 
 thingResult.error().is(ErrorCode::SomeErrorReason)
+
+bool Error::is(std::error_code errorCode)
+std::optional<Error> Error::as(std::error_code errorCode)
+std::string Error::toString()

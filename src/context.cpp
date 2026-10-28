@@ -9,7 +9,7 @@
 
 namespace amj {
 
-std::optional<amj::Error> Context::error() const {
+std::optional<amj::Error> Context::errorOption() const {
     if (cancellation.stop_requested()) {
         return amj::Error{
             .errorCode = std::make_error_code(std::errc::operation_canceled),

@@ -48,6 +48,7 @@
 - Do NOT use #ifdef. Use only #if defined().
 - For Apple, highly prefer the internal headers (sys/fcntl.h) over the portable ones (fcntl.h) to placate the clangd linter.
 - Never implicitly convert between integers and bools. Test integers with == 0 / != 0; test bools directly or with !. Class types with explicit operator bool() (e.g. std::error_code) may be tested directly.
+- Call std::optional<Thing> as "thingOption", call std::expected<Thing, Error> as "thingResult". So when we unbox thingOption.value() or thingResult.value(), we can call the Thing as "thing".
 
 ## Python
 - Use typed Python as much as possible.

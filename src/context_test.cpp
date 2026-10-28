@@ -9,7 +9,7 @@
 
 TEST(Context, DefaultHasNoError) {
     const amj::Context ctx;
-    EXPECT_FALSE(ctx.error().has_value());
+    EXPECT_FALSE(ctx.errorOption().has_value());
 }
 
 TEST(Context, ExpiredDeadlineTimesOut) {
@@ -17,12 +17,12 @@ TEST(Context, ExpiredDeadlineTimesOut) {
         .cancellation = std::stop_token(),
         .deadline = std::chrono::steady_clock::now(),
     };
-    const std::optional<amj::Error> errorResult = ctx.error();
-    if (!errorResult.has_value()) {
+    const std::optional<amj::Error> errorOption = ctx.errorOption();
+    if (!errorOption.has_value()) {
         FAIL() << "expected a context error";
         return;
     }
-    const amj::Error& error = errorResult.value();
+    const amj::Error& error = errorOption.value();
     EXPECT_EQ(error.errorCode, std::make_error_code(std::errc::timed_out));
     EXPECT_EQ(error.errorMessage, "context deadline exceeded");
     EXPECT_TRUE(error.stacktrace.empty());
@@ -35,12 +35,12 @@ TEST(Context, CancellationTakesPrecedenceOverTimeout) {
         .deadline = std::chrono::steady_clock::now(),
     };
     stopSource.request_stop();
-    const std::optional<amj::Error> errorResult = ctx.error();
-    if (!errorResult.has_value()) {
+    const std::optional<amj::Error> errorOption = ctx.errorOption();
+    if (!errorOption.has_value()) {
         FAIL() << "expected a context error";
         return;
     }
-    const amj::Error& error = errorResult.value();
+    const amj::Error& error = errorOption.value();
     EXPECT_EQ(error.errorCode, std::make_error_code(std::errc::operation_canceled));
     EXPECT_EQ(error.errorMessage, "context canceled");
     EXPECT_TRUE(error.stacktrace.empty());

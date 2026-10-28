@@ -13,23 +13,23 @@ TEST(Errors, DefaultHasNoCode) {
 }
 
 TEST(Errors, MatchesCauseWithoutOuterCode) {
-    const std::error_code errorCode = std::make_error_code(std::errc::invalid_argument);
-    const amj::Error cause = {
-        .errorCode = errorCode,
+    const std::error_code causeErrorCode = std::make_error_code(std::errc::invalid_argument);
+    const amj::Error causeError = {
+        .errorCode = causeErrorCode,
         .errorMessage = "invalid input",
         .detail = std::string("input detail"),
     };
     const amj::Error error = {
         .errorMessage = "operation failed",
-        .cause = std::make_shared<const amj::Error>(cause),
+        .cause = std::make_shared<const amj::Error>(causeError),
     };
     EXPECT_FALSE(static_cast<bool>(error.errorCode));
-    EXPECT_TRUE(error.is(errorCode));
+    EXPECT_TRUE(error.is(causeErrorCode));
     EXPECT_FALSE(error.is(std::make_error_code(std::errc::timed_out)));
-    const amj::Error* matched = error.as(errorCode);
-    ASSERT_EQ(matched, error.cause.get());
-    ASSERT_NE(matched, nullptr);
-    const std::string* detail = std::any_cast<std::string>(&matched->detail);
+    const amj::Error* asError = error.as(causeErrorCode);
+    ASSERT_EQ(asError, error.cause.get());
+    ASSERT_NE(asError, nullptr);
+    const std::string* detail = std::any_cast<std::string>(&asError->detail);
     ASSERT_NE(detail, nullptr);
     EXPECT_EQ(*detail, "input detail");
     EXPECT_EQ(error.as(std::make_error_code(std::errc::timed_out)), nullptr);
