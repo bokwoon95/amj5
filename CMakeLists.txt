@@ -73,13 +73,16 @@ include(CTest)
 
 set(amj_libraries)
 set(amj_executables)
+set(amj_test_libraries)
 set(amj_test_sources)
+set(amj_test_filters)
 
 ## == src == ##
 
 add_library(amj_errors STATIC src/errors.cpp)
 list(APPEND amj_libraries amj_errors)
 if(BUILD_TESTING)
+    list(APPEND amj_test_libraries amj_errors)
     list(APPEND amj_test_sources src/errors_test.cpp)
 endif()
 
@@ -87,6 +90,7 @@ add_library(amj_context STATIC src/context.cpp)
 list(APPEND amj_libraries amj_context)
 target_link_libraries(amj_context PRIVATE Threads::Threads)
 if(BUILD_TESTING)
+    list(APPEND amj_test_libraries amj_context Threads::Threads)
     list(APPEND amj_test_sources src/context_test.cpp)
 endif()
 
@@ -96,7 +100,11 @@ add_library(amj_keyring STATIC src/keyring/keyring.cpp)
 list(APPEND amj_libraries amj_keyring)
 target_link_libraries(amj_keyring PUBLIC amj_errors)
 if(BUILD_TESTING)
+    list(APPEND amj_test_libraries amj_keyring)
     list(APPEND amj_test_sources src/keyring/keyring_test.cpp)
+    # Serialize native-store integration tests without blocking unrelated tests.
+    list(APPEND amj_test_filters "KeyringIntegration.*")
+    set("amj_test_properties_KeyringIntegration.*" RESOURCE_LOCK keyring)
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
@@ -126,14 +134,28 @@ if(BUILD_TESTING)
     # Tests are built explicitly by scripts/test.ps1, never by the default build.
     add_executable(amj_tests EXCLUDE_FROM_ALL ${amj_test_sources})
     list(APPEND amj_executables amj_tests)
-    target_link_libraries(amj_tests PRIVATE
-        amj_errors
-        amj_context
-        amj_keyring
-        Threads::Threads
-        GTest::gtest_main
-    )
-    gtest_discover_tests(amj_tests DISCOVERY_MODE PRE_TEST)
+    target_link_libraries(amj_tests PRIVATE ${amj_test_libraries} GTest::gtest_main)
+
+    # Each section can register non-overlapping filters and their test properties.
+    foreach(amj_filter IN LISTS amj_test_filters)
+        gtest_discover_tests(amj_tests
+            DISCOVERY_MODE PRE_TEST
+            TEST_FILTER "${amj_filter}"
+            PROPERTIES ${amj_test_properties_${amj_filter}}
+        )
+    endforeach()
+
+    # Discover the remaining tests. A leading '-' excludes every registered
+    # filter (joined with ':' in GoogleTest syntax), avoiding duplicate tests.
+    if(amj_test_filters)
+        list(JOIN amj_test_filters ":" amj_excluded_filters)
+        gtest_discover_tests(amj_tests
+            DISCOVERY_MODE PRE_TEST
+            TEST_FILTER "-${amj_excluded_filters}"
+        )
+    else()
+        gtest_discover_tests(amj_tests DISCOVERY_MODE PRE_TEST)
+    endif()
 
     if(ENABLE_COVERAGE)
         if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")

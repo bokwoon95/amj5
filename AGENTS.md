@@ -16,6 +16,7 @@
 - Write C++ like Go: prefer straightforward conditionals and loops, useful zero values, and structs/classes.
 - Use std types where possible.
 - Prefer adding minimal structs and fields.
+- DO NOT define macros. There is always a non-macro way to do something, or else just bite the bullet and repeat the code.
 - DO NOT use auto when the type can be explicitly named EXCEPT for lambdas, so we don't have to step through a std::function wrapper during debugging.
 - DO NOT use *T t = new T, use *T t = new T().
 - DO NOT use uniform initialization syntax i.e. int64_t num{0}.

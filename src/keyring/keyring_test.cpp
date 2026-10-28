@@ -6,7 +6,7 @@
 
 #include <array>
 #include <chrono>
-#include <cstdlib>
+#include <cstddef>
 #include <expected>
 #include <iostream>
 #include <random>
@@ -16,17 +16,6 @@
 
 namespace amj::keyring {
 namespace {
-
-// A skipped operation must exit the test itself, not just a helper function.
-#define ASSERT_KEYRING_SUCCESS(result)                                                                 \
-    do {                                                                                              \
-        if (!(result).has_value()) {                                                                  \
-            if ((result).error().is(ErrorCode::AccessDenied) || (result).error().is(ErrorCode::Unavailable)) { \
-                GTEST_SKIP() << #result << ": " << (result).error().toString();                          \
-            }                                                                                         \
-            FAIL() << #result << ": " << (result).error().toString();                                    \
-        }                                                                                             \
-    } while (false)
 
 TEST(KeyringErrors, CodesHaveStableCategoryAndMessages) {
     const std::array<ErrorCode, 5> errorCodes = {ErrorCode::GenericError, ErrorCode::NotFound, ErrorCode::Unavailable, ErrorCode::SecretTooLong, ErrorCode::AccessDenied};
@@ -53,15 +42,16 @@ class KeyringIntegration : public testing::Test {
     const std::array<std::string, 2> users = {"test-user", "test-user-\xE7\x94\xA8\xE6\x88\xB7"};
 
     void SetUp() override {
-        const char* enabled = std::getenv("AMJ_KEYRING_TESTS");
-        if (enabled == nullptr || std::string(enabled) != "1") {
-            GTEST_SKIP() << "Set AMJ_KEYRING_TESTS=1 to access the real OS credential store (may prompt/block).";
-        }
         std::random_device randomDevice;
         service = "amj.keyring.tests." + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + "." + std::to_string(randomDevice()) + "." + std::to_string(randomDevice());
         std::cerr << "Keyring integration test: OS authorization may be required; waiting for native calls. Service: " << service << '\n';
         const std::expected<bool, amj::Error> availableResult = isAvailable();
-        ASSERT_KEYRING_SUCCESS(availableResult);
+        if (!availableResult.has_value()) {
+            if (availableResult.error().is(ErrorCode::AccessDenied) || availableResult.error().is(ErrorCode::Unavailable)) {
+                GTEST_SKIP() << "isAvailable: " << availableResult.error().toString();
+            }
+            FAIL() << "isAvailable: " << availableResult.error().toString();
+        }
         if (!availableResult.value()) {
             GTEST_SKIP() << "OS credential store is unavailable.";
         }
@@ -107,14 +97,29 @@ TEST_F(KeyringIntegration, RoundTripOverwriteEmptyUnicodeAndSizes) {
     for (const std::string& value : values) {
         SCOPED_TRACE("Secret size: " + std::to_string(value.size()));
         const std::expected<void, amj::Error> saveResult = save(service, users.at(0), value);
-        ASSERT_KEYRING_SUCCESS(saveResult);
+        if (!saveResult.has_value()) {
+            if (saveResult.error().is(ErrorCode::AccessDenied) || saveResult.error().is(ErrorCode::Unavailable)) {
+                GTEST_SKIP() << "save: " << saveResult.error().toString();
+            }
+            FAIL() << "save: " << saveResult.error().toString();
+        }
         const std::expected<std::string, amj::Error> loadResult = load(service, users.at(0));
-        ASSERT_KEYRING_SUCCESS(loadResult);
+        if (!loadResult.has_value()) {
+            if (loadResult.error().is(ErrorCode::AccessDenied) || loadResult.error().is(ErrorCode::Unavailable)) {
+                GTEST_SKIP() << "load: " << loadResult.error().toString();
+            }
+            FAIL() << "load: " << loadResult.error().toString();
+        }
         // Do not print credential contents on mismatch.
         EXPECT_TRUE(loadResult.value() == value) << "Loaded secret differs from saved bytes";
     }
     const std::expected<void, amj::Error> removeResult = remove(service, users.at(0));
-    ASSERT_KEYRING_SUCCESS(removeResult);
+    if (!removeResult.has_value()) {
+        if (removeResult.error().is(ErrorCode::AccessDenied) || removeResult.error().is(ErrorCode::Unavailable)) {
+            GTEST_SKIP() << "remove: " << removeResult.error().toString();
+        }
+        FAIL() << "remove: " << removeResult.error().toString();
+    }
     const std::expected<std::string, amj::Error> loadResult = load(service, users.at(0));
     if (!loadResult.has_value() && (loadResult.error().is(ErrorCode::AccessDenied) || loadResult.error().is(ErrorCode::Unavailable))) {
         GTEST_SKIP() << loadResult.error().toString();
@@ -128,17 +133,32 @@ TEST_F(KeyringIntegration, ServicesAndUsersAreIndependent) {
     for (const std::string& entryService : services) {
         for (const std::string& user : users) {
             const std::expected<void, amj::Error> saveResult = save(entryService, user, "value-" + std::to_string(valueIndex));
-            ASSERT_KEYRING_SUCCESS(saveResult);
+            if (!saveResult.has_value()) {
+                if (saveResult.error().is(ErrorCode::AccessDenied) || saveResult.error().is(ErrorCode::Unavailable)) {
+                    GTEST_SKIP() << "save: " << saveResult.error().toString();
+                }
+                FAIL() << "save: " << saveResult.error().toString();
+            }
             ++valueIndex;
         }
     }
     const std::expected<void, amj::Error> overwriteResult = save(service, users.at(0), "changed");
-    ASSERT_KEYRING_SUCCESS(overwriteResult);
+    if (!overwriteResult.has_value()) {
+        if (overwriteResult.error().is(ErrorCode::AccessDenied) || overwriteResult.error().is(ErrorCode::Unavailable)) {
+            GTEST_SKIP() << "overwrite: " << overwriteResult.error().toString();
+        }
+        FAIL() << "overwrite: " << overwriteResult.error().toString();
+    }
     valueIndex = 0;
     for (const std::string& entryService : services) {
         for (const std::string& user : users) {
             const std::expected<std::string, amj::Error> loadResult = load(entryService, user);
-            ASSERT_KEYRING_SUCCESS(loadResult);
+            if (!loadResult.has_value()) {
+                if (loadResult.error().is(ErrorCode::AccessDenied) || loadResult.error().is(ErrorCode::Unavailable)) {
+                    GTEST_SKIP() << "load: " << loadResult.error().toString();
+                }
+                FAIL() << "load: " << loadResult.error().toString();
+            }
             std::string expectedValue = "value-" + std::to_string(valueIndex);
             if (valueIndex == 0) {
                 expectedValue = "changed";
@@ -154,9 +174,19 @@ TEST_F(KeyringIntegration, ServicesAndUsersAreIndependent) {
 TEST_F(KeyringIntegration, EmbeddedNulBytesRoundTrip) {
     const std::string value("before\0after\0", 13);
     const std::expected<void, amj::Error> saveResult = save(service, users.at(0), value);
-    ASSERT_KEYRING_SUCCESS(saveResult);
+    if (!saveResult.has_value()) {
+        if (saveResult.error().is(ErrorCode::AccessDenied) || saveResult.error().is(ErrorCode::Unavailable)) {
+            GTEST_SKIP() << "save: " << saveResult.error().toString();
+        }
+        FAIL() << "save: " << saveResult.error().toString();
+    }
     const std::expected<std::string, amj::Error> loadResult = load(service, users.at(0));
-    ASSERT_KEYRING_SUCCESS(loadResult);
+    if (!loadResult.has_value()) {
+        if (loadResult.error().is(ErrorCode::AccessDenied) || loadResult.error().is(ErrorCode::Unavailable)) {
+            GTEST_SKIP() << "load: " << loadResult.error().toString();
+        }
+        FAIL() << "load: " << loadResult.error().toString();
+    }
     EXPECT_TRUE(loadResult.value() == value);
 }
 #endif
@@ -164,20 +194,28 @@ TEST_F(KeyringIntegration, EmbeddedNulBytesRoundTrip) {
 #if defined(_WIN32)
 TEST_F(KeyringIntegration, OversizedWritePreservesExistingSecret) {
     const std::expected<void, amj::Error> saveResult = save(service, users.at(0), "original");
-    ASSERT_KEYRING_SUCCESS(saveResult);
+    if (!saveResult.has_value()) {
+        if (saveResult.error().is(ErrorCode::AccessDenied) || saveResult.error().is(ErrorCode::Unavailable)) {
+            GTEST_SKIP() << "save: " << saveResult.error().toString();
+        }
+        FAIL() << "save: " << saveResult.error().toString();
+    }
     // DPAPI overhead means even plaintext at the ciphertext ceiling cannot fit.
     for (const std::size_t size : {18944U, 18945U}) {
         const std::expected<void, amj::Error> oversizedResult = save(service, users.at(0), std::string(size, 'x'));
         ASSERT_FALSE(oversizedResult.has_value());
         EXPECT_TRUE(oversizedResult.error().is(ErrorCode::SecretTooLong)) << oversizedResult.error().toString();
         const std::expected<std::string, amj::Error> loadResult = load(service, users.at(0));
-        ASSERT_KEYRING_SUCCESS(loadResult);
+        if (!loadResult.has_value()) {
+            if (loadResult.error().is(ErrorCode::AccessDenied) || loadResult.error().is(ErrorCode::Unavailable)) {
+                GTEST_SKIP() << "load: " << loadResult.error().toString();
+            }
+            FAIL() << "load: " << loadResult.error().toString();
+        }
         EXPECT_TRUE(loadResult.value() == "original");
     }
 }
 #endif
-
-#undef ASSERT_KEYRING_SUCCESS
 
 } // namespace
 } // namespace amj::keyring
