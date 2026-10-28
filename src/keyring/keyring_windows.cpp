@@ -26,19 +26,7 @@
 
 #include "keyring.hpp"
 
-// clang-format off
-// Windows headers must precede wincred.h and wincrypt.h.
-#include <windows.h> // IWYU pragma: keep
-#include <wincred.h>
-#include <wincrypt.h>
-#include <dpapi.h>
-#include <errhandlingapi.h>
-#include <minwindef.h>
-#include <stringapiset.h>
-#include <winbase.h>
-#include <winerror.h>
-#include <winnls.h>
-// clang-format on
+#include "errors.hpp"
 
 #include <algorithm>
 #include <array>
@@ -50,7 +38,19 @@
 #include <string>
 #include <vector>
 
-#include "errors.hpp"
+// clang-format off
+// windows.h must precede wincred.h and wincrypt.h; wincrypt.h supplies DPAPI types.
+#include <windows.h> // IWYU pragma: keep
+#include <wincred.h>
+#include <wincrypt.h>
+#include <dpapi.h>
+#include <errhandlingapi.h>
+#include <minwindef.h>
+#include <stringapiset.h>
+#include <winbase.h>
+#include <winerror.h>
+#include <winnls.h>
+// clang-format on
 
 namespace amj::keyring {
 

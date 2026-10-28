@@ -23,11 +23,19 @@
  */
 
 #if defined(__APPLE__)
+#include <TargetConditionals.h> // IWYU pragma: keep
+#if TARGET_OS_OSX
 
 #include "keyring.hpp"
 
-#include <TargetConditionals.h> // IWYU pragma: keep
-#if TARGET_OS_OSX
+#include "errors.hpp"
+
+#include <cstddef>
+#include <expected>
+#include <limits>
+#include <span>
+#include <string>
+#include <vector>
 
 #include <CoreFoundation/CFBase.h>
 #include <CoreFoundation/CFData.h>
@@ -37,14 +45,6 @@
 #include <MacTypes.h>
 #include <Security/SecBase.h>
 #include <Security/SecItem.h>
-#include <cstddef>
-#include <expected>
-#include <limits>
-#include <span>
-#include <string>
-#include <vector>
-
-#include "errors.hpp"
 
 namespace amj::keyring {
 

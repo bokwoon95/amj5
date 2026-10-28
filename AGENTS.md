@@ -138,3 +138,12 @@ Prioritize memory safety, defined behavior, and predictable failure over micro-o
 - Separate blocks with exactly one blank line. Omit empty blocks.
 - Sort headers alphabetically within each block; never merge or reorder blocks.
 - When headers require a specific dependency order, preserve it using narrowly scoped `clang-format off/on` comments and explain why.
+- Platform-detection headers needed by preprocessor guards are exempt from normal include ordering. Place them immediately after the outer platform guard, followed immediately by the more specific guard.
+- For macOS implementation files, use this opening, then follow normal include ordering inside `#if TARGET_OS_OSX`:
+```cpp
+    #if defined(__APPLE__)
+    #include <TargetConditionals.h> // IWYU pragma: keep
+    #if TARGET_OS_OSX
+
+    #include "keyring.hpp"
+```

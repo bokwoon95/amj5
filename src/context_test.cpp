@@ -1,11 +1,13 @@
-#include <chrono>
+#include "context.hpp"
+
+#include "errors.hpp"
+
 #include <gtest/gtest.h>
+
+#include <chrono>
 #include <optional>
 #include <stop_token>
 #include <system_error>
-
-#include "context.hpp"
-#include "errors.hpp"
 
 namespace amj {
 namespace {

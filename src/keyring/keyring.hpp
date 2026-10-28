@@ -23,13 +23,13 @@
 
 #pragma once
 
+#include "errors.hpp"
+
 #include <cstdint>
 #include <expected>
 #include <string>
 #include <system_error>
 #include <type_traits>
-
-#include "errors.hpp"
 
 namespace amj::keyring {
 

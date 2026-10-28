@@ -27,12 +27,13 @@
 
 #include "keyring.hpp"
 
-#include <expected>
+#include "errors.hpp"
+
 #include <libsecret/secret.h>
+
+#include <expected>
 #include <memory>
 #include <string>
-
-#include "errors.hpp"
 
 namespace amj::keyring {
 

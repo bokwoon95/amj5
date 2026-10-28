@@ -1,11 +1,11 @@
 #include "context.hpp"
 
+#include "errors.hpp"
+
 #include <chrono>
 #include <optional>
 #include <stop_token>
 #include <system_error>
-
-#include "errors.hpp"
 
 namespace amj {
 

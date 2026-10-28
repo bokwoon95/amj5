@@ -1,10 +1,10 @@
 #pragma once
 
+#include "errors.hpp"
+
 #include <chrono>
 #include <optional>
 #include <stop_token>
-
-#include "errors.hpp"
 
 namespace amj {
 
