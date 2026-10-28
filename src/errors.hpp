@@ -34,7 +34,7 @@ struct Error {
 
 // Captures at most 30 runtime frames; does nothing if the chain already has a trace.
 // Call at the origin of an unexpected failure, not at every propagation site.
-// Requires standard-library stacktrace support. Capture/formatting may throw.
+// Source locations require debug symbols. Capture/formatting may throw.
 [[nodiscard]] Error withStackTrace(Error error);
 
 } // namespace amj

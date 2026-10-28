@@ -50,6 +50,9 @@ endif()
 # Use CMake's built-in Threads module for threading.
 find_package(Threads REQUIRED)
 
+# Stack traces.
+find_package(cpptrace CONFIG REQUIRED)
+
 # Select MSVC C/C++ runtime linkage; CMake generates the compiler flags.
 #
 # set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreadedDebugDLL) -> /MDd (dynamic debug
@@ -80,6 +83,7 @@ set(amj_test_filters)
 ## == src == ##
 
 add_library(amj_errors STATIC src/errors.cpp)
+target_link_libraries(amj_errors PRIVATE cpptrace::cpptrace)
 list(APPEND amj_libraries amj_errors)
 if(BUILD_TESTING)
     list(APPEND amj_test_libraries amj_errors)

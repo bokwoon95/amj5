@@ -1,8 +1,9 @@
 #include "errors.hpp"
 
+#include <cpptrace/basic.hpp>
+
 #include <cstdint>
 #include <memory>
-#include <stacktrace>
 #include <string>
 #include <system_error>
 #include <tuple>
@@ -54,8 +55,12 @@ Error withStackTrace(Error error) {
             return error;
         }
     }
-    for (const std::stacktrace_entry& frame : std::stacktrace::current(1, 30)) {
-        error.stacktrace.emplace_back(frame.source_file(), frame.source_line(), frame.description());
+    const cpptrace::stacktrace stacktrace = cpptrace::generate_trace(1, 30);
+    for (const cpptrace::stacktrace_frame& frame : stacktrace.frames) {
+        if (error.stacktrace.size() >= 30) {
+            break;
+        }
+        error.stacktrace.emplace_back(frame.filename, frame.line.value_or(0), frame.symbol);
     }
     return error;
 }
