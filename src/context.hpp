@@ -16,7 +16,7 @@ struct Context {
 
     // Empty code means no error. Cancellation takes precedence over timeout.
     // Uses std::errc::operation_canceled and std::errc::timed_out codes.
-    [[nodiscard]] std::error_code error() const;
+    [[nodiscard]] std::error_code errorCode() const;
 };
 
 } // namespace amj

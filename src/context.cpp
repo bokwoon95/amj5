@@ -7,7 +7,7 @@
 
 namespace amj {
 
-std::error_code Context::error() const {
+std::error_code Context::errorCode() const {
     if (cancellation.stop_requested()) {
         return std::make_error_code(std::errc::operation_canceled);
     }

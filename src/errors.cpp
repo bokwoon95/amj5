@@ -4,7 +4,6 @@
 #include <source_location>
 #include <string>
 #include <system_error>
-#include <utility>
 #include <version> // IWYU pragma: keep (standard-library feature-test macros)
 
 #if defined(_MSVC_STL_VERSION)
@@ -17,15 +16,6 @@
 #endif
 
 namespace amj {
-
-Error wrapError(Error cause, std::string message) {
-    const std::error_code errorCode = cause.errorCode;
-    return Error{
-        .errorCode = errorCode,
-        .errorMessage = std::move(message),
-        .cause = std::make_shared<const Error>(std::move(cause)),
-    };
-}
 
 bool matchesError(const Error& error, std::error_code code) {
     for (const Error* current = &error; current != nullptr; current = current->cause.get()) {

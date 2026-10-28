@@ -23,9 +23,6 @@ struct Error {
     std::vector<std::string> stacktrace = {};
 };
 
-// Adds context while retaining the cause's code and complete original error.
-[[nodiscard]] Error wrapError(Error cause, std::string message);
-
 // Searches every error in the cause chain for an exact code match.
 [[nodiscard]] bool matchesError(const Error& error, std::error_code code);
 

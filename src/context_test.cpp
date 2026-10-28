@@ -7,7 +7,7 @@
 
 TEST(Context, DefaultHasNoError) {
     const amj::Context ctx;
-    EXPECT_FALSE(static_cast<bool>(ctx.error()));
+    EXPECT_TRUE(!ctx.errorCode());
 }
 
 TEST(Context, ExpiredDeadlineTimesOut) {
@@ -15,7 +15,7 @@ TEST(Context, ExpiredDeadlineTimesOut) {
         .cancellation = std::stop_token(),
         .deadline = std::chrono::steady_clock::now(),
     };
-    EXPECT_EQ(ctx.error(), std::make_error_code(std::errc::timed_out));
+    EXPECT_EQ(ctx.errorCode(), std::make_error_code(std::errc::timed_out));
 }
 
 TEST(Context, CancellationTakesPrecedenceOverTimeout) {
@@ -25,5 +25,5 @@ TEST(Context, CancellationTakesPrecedenceOverTimeout) {
         .deadline = std::chrono::steady_clock::now(),
     };
     stopSource.request_stop();
-    EXPECT_EQ(ctx.error(), std::make_error_code(std::errc::operation_canceled));
+    EXPECT_EQ(ctx.errorCode(), std::make_error_code(std::errc::operation_canceled));
 }

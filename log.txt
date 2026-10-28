@@ -1,0 +1,16 @@
+err = thingResult.error()
+if (amj::errorIs(thingResult.error(), ErrorCode::SomeErrorReason)) {
+    const myError = amj::errorAs(thingResult.error(), ErrorCode::SomeErrorReason)
+    if (!myError) {
+    }
+    myError.detail
+}
+
+thingResult.error().toString()
+
+amj::errorIs(err, )
+
+amj::isError()
+amj::asError()
+
+thingResult.error().is(ErrorCode::SomeErrorReason)
