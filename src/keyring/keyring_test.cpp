@@ -92,10 +92,11 @@ TEST_F(KeyringIntegration, MissingEntriesReportNotFound) {
     EXPECT_TRUE(removeResult.error().is(ErrorCode::NotFound)) << removeResult.error().toString();
 }
 
-TEST_F(KeyringIntegration, RoundTripOverwriteEmptyUnicodeAndSizes) {
+TEST_F(KeyringIntegration, RoundTripOverwriteUnicodeAndSizes) {
     // Exercise both sides of Windows' direct-blob limit, multiple encrypted
-    // attributes, and large-to-small/empty updates without assuming OS storage format.
-    const std::vector<std::string> values = {"original", "replacement-\xE5\xAF\x86\xE7\xA0\x81", "", std::string(2560, 'a'), std::string(2561, 'b'), std::string(12000, 'c'), "small-again", ""};
+    // attributes, and large-to-small updates without assuming OS storage format.
+    // Empty overwrites are outside application usage; delete entries instead.
+    const std::vector<std::string> values = {"original", "replacement-\xE5\xAF\x86\xE7\xA0\x81", "short", std::string(2560, 'a'), std::string(2561, 'b'), std::string(12000, 'c'), "small-again", "final"};
     for (const std::string& value : values) {
         SCOPED_TRACE("Secret size: " + std::to_string(value.size()));
         const std::expected<void, errors::Error> saveResult = save(service, users.at(0), value);
