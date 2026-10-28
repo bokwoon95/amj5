@@ -217,10 +217,21 @@ while IFS= read -r source; do
                 printf '\nLinting: %s\n' "$source"
                 "$tidy" -p "$build" --fix "$source" || status=1
             else
+                # Serialize progress and completed diagnostics so file blocks stay intact.
+                while ! mkdir "$work/output.lock" 2>/dev/null; do sleep 0.1; done
+                printf 'Linting: %s\n' "$source"
+                rmdir "$work/output.lock"
                 (
-                    printf '\nLinting: %s\n' "$source"
-                    "$tidy" -p "$build" "$source"
-                ) > "$work/$source_count.log" 2>&1 &
+                    tidy_status=0
+                    "$tidy" -p "$build" "$source" > "$work/$source_count.log" 2>&1 || tidy_status=$?
+                    while ! mkdir "$work/output.lock" 2>/dev/null; do sleep 0.1; done
+                    printf '\nFinished linting: %s\n' "$source"
+                    while IFS= read -r line || [ -n "$line" ]; do
+                        printf '%s\n' "$line"
+                    done < "$work/$source_count.log"
+                    rmdir "$work/output.lock"
+                    exit "$tidy_status"
+                ) &
                 pids="$pids $!"
                 active=$((active + 1))
                 if [ "$active" -ge "$workers" ]; then
@@ -234,14 +245,6 @@ while IFS= read -r source; do
 done < "$source_list"
 for pid in $pids; do wait "$pid" || status=1; done
 pids=""
-if [ "$fix" = false ]; then
-    index=1
-    while [ "$index" -le "$source_count" ]; do
-        # Replay captured diagnostics, not source files, as intact per-file blocks.
-        while IFS= read -r line || [ -n "$line" ]; do printf '%s\n' "$line"; done < "$work/$index.log"
-        index=$((index + 1))
-    done
-fi
 if [ "$source_count" -eq 0 ]; then
     printf '%s\n' "No repository src/ files were found in $build/compile_commands.json. Run sh scripts/build.ps1 -clang first." >&2
     exit 1

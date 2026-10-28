@@ -94,7 +94,6 @@ errors::Error makeError(OSStatus status) {
 }
 
 // Returns an owned dictionary under Core Foundation's Create rule.
-// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): Matches the public keyring API's service/user ordering.
 std::expected<CFMutableDictionaryRef, errors::Error> createQuery(const std::string& service, const std::string& user) {
     const ScopedCFRef<CFStringRef> cfService(CFStringCreateWithCString(kCFAllocatorDefault, service.c_str(), kCFStringEncodingUTF8));
     const ScopedCFRef<CFStringRef> cfUser(CFStringCreateWithCString(kCFAllocatorDefault, user.c_str(), kCFStringEncodingUTF8));
@@ -116,7 +115,6 @@ std::expected<CFMutableDictionaryRef, errors::Error> createQuery(const std::stri
 
 } // namespace
 
-// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): Parameter ordering is defined by the public keyring API.
 std::expected<void, errors::Error> save(const std::string& service, const std::string& user, const std::string& value) {
     const std::expected<CFMutableDictionaryRef, errors::Error> queryResult = createQuery(service, user);
     if (!queryResult.has_value()) {

@@ -126,7 +126,6 @@ std::expected<std::wstring, errors::Error> makeTargetName(const std::string& ser
 
 } // namespace
 
-// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): Parameter ordering is defined by the public keyring API.
 std::expected<void, errors::Error> save(const std::string& service, const std::string& user, const std::string& value) {
     std::expected<std::wstring, errors::Error> targetResult = makeTargetName(service, user);
     if (!targetResult.has_value()) {
