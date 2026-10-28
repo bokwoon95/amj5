@@ -68,22 +68,37 @@ if(MSVC)
     endif()
 endif()
 
+# BUILD_TESTING defaults to ON; pass -DBUILD_TESTING=OFF to disable testing.
+include(CTest)
+
 set(amj_libraries)
 set(amj_executables)
+set(amj_test_sources)
 
 ## == src == ##
 
 add_library(amj_errors STATIC src/errors.cpp)
 list(APPEND amj_libraries amj_errors)
+if(BUILD_TESTING)
+    list(APPEND amj_test_sources src/errors_test.cpp)
+endif()
 
 add_library(amj_context STATIC src/context.cpp)
 list(APPEND amj_libraries amj_context)
 target_link_libraries(amj_context PRIVATE Threads::Threads)
+if(BUILD_TESTING)
+    list(APPEND amj_test_sources src/context_test.cpp)
+endif()
 
 ## == src/keyring == ##
 
 add_library(amj_keyring STATIC src/keyring/keyring.cpp)
+list(APPEND amj_libraries amj_keyring)
 target_link_libraries(amj_keyring PUBLIC amj_errors)
+if(BUILD_TESTING)
+    list(APPEND amj_test_sources src/keyring/keyring_test.cpp)
+endif()
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     target_sources(amj_keyring PRIVATE src/keyring/keyring_windows.cpp)
     target_link_libraries(amj_keyring PRIVATE advapi32 crypt32)
@@ -101,44 +116,56 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 else()
     message(FATAL_ERROR "Unsupported keyring platform")
 endif()
-set(amj_libraries amj_errors amj_context amj_keyring)
+
+## == Tests == ##
+
+if(BUILD_TESTING)
+    find_package(GTest CONFIG REQUIRED)
+    include(GoogleTest)
+
+    # Tests are built explicitly by scripts/test.ps1, never by the default build.
+    add_executable(amj_tests EXCLUDE_FROM_ALL ${amj_test_sources})
+    list(APPEND amj_executables amj_tests)
+    target_link_libraries(amj_tests PRIVATE
+        amj_errors
+        amj_context
+        amj_keyring
+        Threads::Threads
+        GTest::gtest_main
+    )
+    gtest_discover_tests(amj_tests DISCOVERY_MODE PRE_TEST)
+
+    if(ENABLE_COVERAGE)
+        if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+            message(FATAL_ERROR "Coverage requires LLVM Clang; use scripts/test.ps1 -coverage")
+        endif()
+        if(MSVC)
+            # clang-cl embeds the profile runtime library name in its object files.
+            execute_process(COMMAND "${CMAKE_CXX_COMPILER}" --print-runtime-dir OUTPUT_VARIABLE amj_clang_runtime_directory OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+        endif()
+        foreach(amj_target IN ITEMS amj_tests ${amj_libraries})
+            target_compile_options(${amj_target} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+            if(MSVC)
+                target_link_directories(${amj_target} PUBLIC "${amj_clang_runtime_directory}")
+            else()
+                target_link_options(${amj_target} PUBLIC -fprofile-instr-generate)
+            endif()
+        endforeach()
+    endif()
+endif()
+
+## == Common build settings == ##
+
 foreach(amj_target IN LISTS amj_libraries)
     target_include_directories(${amj_target} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 endforeach()
 
-## == Tests == ##
+# Keep executables beside one another even with multi-configuration generators.
+foreach(amj_target IN LISTS amj_executables)
+    set_target_properties(${amj_target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<0:>")
+endforeach()
 
-include(CTest)
-set(amj_targets ${amj_libraries})
-if(BUILD_TESTING)
-    find_package(GTest CONFIG REQUIRED)
-    include(GoogleTest)
-    # Tests are built explicitly by scripts/test.ps1, not by the default build.
-    add_executable(amj_tests EXCLUDE_FROM_ALL src/errors_test.cpp src/context_test.cpp src/keyring/keyring_test.cpp)
-    target_link_libraries(amj_tests PRIVATE amj_errors amj_context amj_keyring Threads::Threads GTest::gtest_main)
-    set_target_properties(amj_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<0:>")
-    gtest_discover_tests(amj_tests DISCOVERY_MODE PRE_TEST)
-    list(APPEND amj_targets amj_tests)
-endif()
-
-if(ENABLE_COVERAGE)
-    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        message(FATAL_ERROR "Coverage requires LLVM Clang; use scripts/test.ps1 -coverage")
-    endif()
-    if(MSVC)
-        execute_process(COMMAND "${CMAKE_CXX_COMPILER}" --print-runtime-dir OUTPUT_VARIABLE amj_clang_runtime_directory OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
-    endif()
-    foreach(amj_target IN LISTS amj_targets)
-        target_compile_options(${amj_target} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-        if(MSVC)
-            target_link_directories(${amj_target} PUBLIC "${amj_clang_runtime_directory}")
-        else()
-            target_link_options(${amj_target} PUBLIC -fprofile-instr-generate)
-        endif()
-    endforeach()
-endif()
-
-foreach(amj_target IN LISTS amj_targets)
+foreach(amj_target IN LISTS amj_libraries amj_executables)
     if(MSVC)
         target_compile_definitions(${amj_target} PRIVATE _CRT_SECURE_NO_WARNINGS)
         target_compile_options(${amj_target} PRIVATE /W4 /WX /permissive-)
