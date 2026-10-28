@@ -1,10 +1,11 @@
 #pragma once
 
 #include <any>
+#include <cstdint>
 #include <memory>
-#include <source_location>
 #include <string>
 #include <system_error>
+#include <tuple>
 #include <vector>
 
 namespace amj {
@@ -18,34 +19,22 @@ struct Error {
     std::any detail = std::any();
     std::shared_ptr<const Error> cause = nullptr;
 
-    // Empty unless explicitly captured for an unexpected failure.
-    // Stored as text so the public type does not depend on stacktrace support.
-    std::vector<std::string> stacktrace = {};
+    // (file, line, description); empty unless explicitly captured.
+    std::vector<std::tuple<std::string, std::uint_least32_t, std::string>> stacktrace = {};
+
+    // Searches this error and its cause chain for an exact code match.
+    [[nodiscard]] bool is(std::error_code targetErrorCode) const;
+
+    // First matching error, or nullptr. Borrowed; must remain alive and unchanged.
+    [[nodiscard]] const Error* as(std::error_code targetErrorCode) const;
+
+    // Includes contextual messages, underlying failures, and any captured trace.
+    [[nodiscard]] std::string toString() const;
 };
 
-// Searches every error in the cause chain for an exact code match.
-[[nodiscard]] bool matchesError(const Error& error, std::error_code code);
-
-// Returns a borrowed pointer, valid only while the corresponding detail remains
-// alive and unchanged. A missing detail type returns nullptr.
-template <typename T>
-[[nodiscard]] const T* findErrorDetail(const Error& error) {
-    for (const Error* current = &error; current != nullptr; current = current->cause.get()) {
-        const T* detail = std::any_cast<T>(&current->detail);
-        if (detail != nullptr) {
-            return detail;
-        }
-    }
-    return nullptr;
-}
-
-// Includes contextual messages, underlying failures, and any captured trace.
-[[nodiscard]] std::string formatError(const Error& error);
-
-// Captures at most 30 frames; does nothing if the chain already has a trace.
+// Captures at most 30 runtime frames; does nothing if the chain already has a trace.
 // Call at the origin of an unexpected failure, not at every propagation site.
-// Without standard-library stacktrace support, records only the caller's
-// source location instead of a full stack. Allocation/formatting may throw.
-[[nodiscard]] Error withStacktrace(Error error, std::source_location location = std::source_location::current());
+// Requires standard-library stacktrace support. Capture/formatting may throw.
+[[nodiscard]] Error withStackTrace(Error error);
 
 } // namespace amj

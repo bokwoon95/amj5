@@ -1,34 +1,30 @@
 #include "errors.hpp"
 
+#include <cstdint>
 #include <memory>
-#include <source_location>
+#include <stacktrace>
 #include <string>
 #include <system_error>
-#include <version> // IWYU pragma: keep (standard-library feature-test macros)
-
-#if defined(_MSVC_STL_VERSION)
-#include <yvals_core.h>
-#endif
-
-#if defined(__cpp_lib_stacktrace) && __cpp_lib_stacktrace >= 202011L
-#include <sstream>
-#include <stacktrace>
-#endif
+#include <tuple>
 
 namespace amj {
 
-bool matchesError(const Error& error, std::error_code code) {
-    for (const Error* current = &error; current != nullptr; current = current->cause.get()) {
-        if (current->errorCode == code) {
-            return true;
-        }
-    }
-    return false;
+bool Error::is(std::error_code targetErrorCode) const {
+    return as(targetErrorCode) != nullptr;
 }
 
-std::string formatError(const Error& error) {
+const Error* Error::as(std::error_code targetErrorCode) const {
+    for (const Error* current = this; current != nullptr; current = current->cause.get()) {
+        if (current->errorCode == targetErrorCode) {
+            return current;
+        }
+    }
+    return nullptr;
+}
+
+std::string Error::toString() const {
     std::string text;
-    for (const Error* current = &error; current != nullptr; current = current->cause.get()) {
+    for (const Error* current = this; current != nullptr; current = current->cause.get()) {
         if (!text.empty()) {
             text += ": ";
         }
@@ -38,32 +34,28 @@ std::string formatError(const Error& error) {
             text += current->errorCode.message();
         }
     }
-    for (const Error* current = &error; current != nullptr; current = current->cause.get()) {
-        for (const std::string& frame : current->stacktrace) {
-            text += "\n  at ";
-            text += frame;
+    for (const Error* current = this; current != nullptr; current = current->cause.get()) {
+        for (const std::tuple<std::string, std::uint_least32_t, std::string>& frame : current->stacktrace) {
+            const std::string& file = std::get<0>(frame);
+            const std::uint_least32_t line = std::get<1>(frame);
+            const std::string& description = std::get<2>(frame);
+            text += "\n  at " + file + ":" + std::to_string(line);
+            if (!description.empty()) {
+                text += " " + description;
+            }
         }
     }
     return text;
 }
 
-Error withStacktrace(Error error, std::source_location location) {
+Error withStackTrace(Error error) {
     for (const Error* current = &error; current != nullptr; current = current->cause.get()) {
         if (!current->stacktrace.empty()) {
             return error;
         }
     }
-
-#if defined(__cpp_lib_stacktrace) && __cpp_lib_stacktrace >= 202011L
     for (const std::stacktrace_entry& frame : std::stacktrace::current(1, 30)) {
-        std::ostringstream text;
-        text << frame;
-        error.stacktrace.push_back(text.str());
-    }
-#endif
-    // Also handles failure to capture any native frames on supported platforms.
-    if (error.stacktrace.empty()) {
-        error.stacktrace.push_back(std::string(location.file_name()) + ":" + std::to_string(location.line()) + " " + location.function_name());
+        error.stacktrace.emplace_back(frame.source_file(), frame.source_line(), frame.description());
     }
     return error;
 }

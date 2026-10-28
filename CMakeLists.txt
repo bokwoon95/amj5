@@ -1,17 +1,30 @@
 cmake_minimum_required(VERSION 3.20)
 
+# Enable ASan and UBSan by default (pass in -DENABLE_ASAN_UBSAN=OFF to disable
+# it for release builds).
 option(ENABLE_ASAN_UBSAN "Enable sanitizers in Debug (ASan only with MSVC)" ON)
+
+# Disable coverage by default (pass in -DENABLE_COVERAGE=ON to enable it for test builds).
 option(ENABLE_COVERAGE "Enable LLVM source coverage" OFF)
 
+# Use vcpkg's toolchain file so that vcpkg can work. If -DCMAKE_TOOLCHAIN_FILE
+# was not passed in, default to the directory of the vcpkg executable in PATH.
 if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
     find_program(amj_vcpkg_executable vcpkg REQUIRED)
     get_filename_component(amj_vcpkg_directory "${amj_vcpkg_executable}" DIRECTORY)
     set(CMAKE_TOOLCHAIN_FILE "${amj_vcpkg_directory}/scripts/buildsystems/vcpkg.cmake" CACHE FILEPATH "vcpkg toolchain")
 endif()
 
-# Use the same macOS SDK for the native compiler and standalone LLVM tooling.
+# Tell LLVM clang where to find macOS system headers so clangd and clang-tidy
+# can work. Must be configured before project() compiler detection so that
+# compiler detection and compilation use the same SDK.
+#
+# It works by setting the CMake-native CMAKE_OSX_SYSROOT variable on macOS.
 if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND NOT CMAKE_OSX_SYSROOT)
     execute_process(COMMAND xcrun --sdk macosx --show-sdk-path OUTPUT_VARIABLE amj_macos_sdk OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+    if(NOT amj_sdk_result EQUAL 0)
+        message(FATAL_ERROR "Could not locate the macOS SDK; check xcode-select")
+    endif()
     set(CMAKE_OSX_SYSROOT "${amj_macos_sdk}" CACHE STRING "macOS SDK" FORCE)
 endif()
 
@@ -21,18 +34,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Tell LLVM clang-cl where to find Windows system headers so clangd and
+# clang-tidy can work. Must be configured after project() compiler detection so
+# that we know whether the compiler is MSVC (LLVM's clang-cl counts as MSVC).
+#
+# It works by passing the INCLUDE environment variable (configured by
+# vcvars64.bat) to include_directories().
 if(MSVC)
     if("$ENV{INCLUDE}" STREQUAL "")
         message(FATAL_ERROR "Use scripts/build.ps1 to initialize the MSVC environment")
     endif()
     include_directories(SYSTEM $ENV{INCLUDE})
-    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:DebugDLL>")
-    if(ENABLE_ASAN_UBSAN)
-        foreach(amj_language C CXX)
-            string(REGEX REPLACE "/RTC[^ ]*" "" CMAKE_${amj_language}_FLAGS_DEBUG "${CMAKE_${amj_language}_FLAGS_DEBUG}")
-            string(REPLACE "/ZI" "/Zi" CMAKE_${amj_language}_FLAGS_DEBUG "${CMAKE_${amj_language}_FLAGS_DEBUG}")
-        endforeach()
-    endif()
 endif()
 
 find_package(Threads REQUIRED)
@@ -43,6 +55,24 @@ set(amj_libraries amj_errors amj_context)
 foreach(amj_target IN LISTS amj_libraries)
     target_include_directories(${amj_target} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 endforeach()
+
+# Select MSVC C/C++ runtime linkage; CMake generates the compiler flags.
+#
+# set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreadedDebugDLL) -> /MDd (dynamic debug
+# runtime, matching prebuilt Qt).
+#
+# set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded) -> /MT (static runtime, no MSVC
+# runtime DLLs to ship).
+if(MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:DebugDLL>")
+    if(ENABLE_ASAN_UBSAN)
+        # ASan is incompatible with /RTC checks and /ZI (Edit and Continue).
+        foreach(amj_language C CXX)
+            string(REGEX REPLACE "/RTC[^ ]*" "" CMAKE_${amj_language}_FLAGS_DEBUG "${CMAKE_${amj_language}_FLAGS_DEBUG}")
+            string(REPLACE "/ZI" "/Zi" CMAKE_${amj_language}_FLAGS_DEBUG "${CMAKE_${amj_language}_FLAGS_DEBUG}")
+        endforeach()
+    endif()
+endif()
 
 include(CTest)
 set(amj_targets ${amj_libraries})
