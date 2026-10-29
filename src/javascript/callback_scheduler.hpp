@@ -35,7 +35,7 @@ class Readiness {
     void notify();
 };
 
-struct ScheduledCallback {
+struct CallbackRecord {
     std::function<void()> callback = {};
     // Only invoked by cancelAll(), not by dispatch() or unschedule().
     std::function<void()> cancel = {};
@@ -59,9 +59,9 @@ class CallbackScheduler {
     std::shared_ptr<Readiness> makeSignal();
     // Signals must originate from this scheduler and may be registered once.
     // Cancel-only entries are allowed, but cannot have a deadline or signal.
-    int64_t schedule(ScheduledCallback scheduledCallback);
+    int64_t schedule(CallbackRecord callbackRecord);
     // Unknown IDs are ignored. Does not invoke the cancellation hook.
-    void unschedule(int64_t scheduledCallbackID);
+    void unschedule(int64_t callbackRecordID);
     // Removes entries before calling them; yields whenever JS jobs are pending.
     void dispatch();
     // Executes no callbacks or JS. Throws if no registration can make progress.
