@@ -124,6 +124,7 @@ Prioritize memory safety, defined behavior, and predictable failure over micro-o
 ## Namespaces and type names
 - Use unqualified project-defined names within their declaring namespace. This also applies in both directions between a namespace and its nested anonymous namespaces.
 - Outside their declaring namespace, qualify functions, types, and other namespace members with exactly one namespace qualifier, using the namespace’s basename. Write `provider::Provider`, `errors::Error`, and `context::Context`, not `amj::provider::Provider` or unqualified imported names. Members declared in enclosing or sibling named namespaces MUST also be qualified.
+- Namespace aliases must be declared independently in every .hpp and .cpp file that uses them, at the beginning of the relevant namespace body. Never rely on an alias declared in an included header, even when it is visible and refers to the same namespace. Repeat identical alias declarations where necessary. For example, if both example.hpp and example.cpp use chrono::steady_clock, both files MUST explicitly declare namespace chrono = std::chrono;.
 - Declare namespace aliases at the beginning of the namespace body, before other declarations, whenever the namespace would otherwise require multiple qualification levels. Alias names MUST match the target namespace’s basename. This applies to project and external namespaces alike:
 ```cpp
 namespace amj::example {
@@ -136,6 +137,7 @@ namespace keyring = amj::keyring;
 namespace provider = amj::provider;
 }
 ```
+- BOTH .cpp and .hpp files should define THEIR OWN namespace aliases. Do not rely on a namespace alias defined in a .hpp file.
 - Namespace declarations and namespace-alias targets may use fully qualified namespace paths; references to namespace members MUST use at most one namespace qualifier. For example, use std::vector and filesystem::path, not std::filesystem::path.
 - Do not introduce type aliases, using-declarations, or using-directives merely to shorten names. Use namespace aliases instead.
 - Namespaces MUST exactly mirror the directory structure beneath `src/`, with `amj` corresponding to `src/`. For example, types declared in `src/provider/openai/client.hpp` belong to `amj::provider::openai`.

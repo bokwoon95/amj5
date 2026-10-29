@@ -17,6 +17,7 @@
 #include <vector>
 
 namespace amj::javascript {
+namespace chrono = std::chrono;
 
 struct Readiness::Wakeup {
     std::mutex mutex = {};
