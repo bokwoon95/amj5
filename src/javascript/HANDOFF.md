@@ -213,8 +213,95 @@ These are reference notes for the next agent, **not evidence the user has unders
 - A weak lifetime token lets JS bindings detect expiration before dereferencing their borrowed scheduler pointer. It expires after destructor cleanup, not after each invocation.
 - Worker result storage uses the transport mutex; scheduler readiness uses the scheduler wakeup mutex. They are separate synchronization domains.
 
+## Latest discussion: await, threads, and Promise jobs
+
+The user is walking through fetch step by step to understand exactly when control crosses between JS, native bindings, the owner loop, and HTTP workers. Do not assume the walkthrough has settled all their questions.
+
+- `fetch()` returns a Promise; it does not block the owner thread waiting for HTTP. `await` suspends the async function, not the runtime or thread.
+- The host starts JS by calling QuickJS evaluation APIs. For a script calling `main()`, `main` executes until suspension, returns its Promise, and the remaining top-level script runs to completion. Evaluation then returns to the host. Suspension does not interrupt arbitrary surrounding JS or immediately jump to the host loop.
+- Native fetch bindings execute synchronously on the owner thread when called by JS. They register scheduler entries and start the HTTP worker before returning a Promise to JS. The outer owner loop does not start the request later.
+- JS and the HTTP worker can execute concurrently. Only JS execution and outer host dispatch alternate on the owner thread.
+- The HTTP worker exists because the current HTTP client performs blocking I/O. It prevents HTTP from blocking timers and other requests' completions/Promise continuations. With nothing runnable, the owner sleeps. A nonblocking HTTP implementation integrated into an event loop could avoid a separate HTTP worker.
+- `setTimeout` starts no thread: register a callback and deadline, then invoke the callback on the owner thread after the deadline when control is available. Timers cannot interrupt executing JS.
+
+### Two queues, concretely
+
+A **scheduler callback** here is the native function fetch registers to read transport state, construct JS values, and call a Promise's resolve/reject function. A **Promise continuation** means the code after `await`, or a callback supplied to `.then()`. Calling resolve/reject queues Promise-related work in QuickJS; it does not directly resume the suspended function. The owner explicitly calls QuickJS's pending-job execution API to run that work.
+
+Conceptual owner loop (JavaScript-style pseudocode, NOT actual API names or the exact old loop):
+
+```js
+quickjs.evaluate(script);
+while (executionStillNeedsToContinue()) {
+    if (quickjs.hasPendingJobs()) {
+        quickjs.executePendingJob();
+    } else if (scheduler.hasReadyCallbacks()) {
+        scheduler.dispatchReadyCallbacks();
+    } else {
+        scheduler.waitForReadyCallbacks();
+    }
+}
+```
+
+Termination policy is intentionally unspecified in this pseudocode. Dispatch must still yield to pending QuickJS jobs between callbacks, as described above.
+
+`Promise.all`, `allSettled`, `any`, and `race` operate inside QuickJS, not CallbackScheduler. They add no scheduler entry of their own and do not automatically cancel unfinished HTTP requests. Respectively they settle when all fulfill/one rejects; all settle; one fulfills/all reject; or the first input settles.
+
+`queueMicrotask(fn)` was introduced during the conversation and confused the user because its meaning was not explained. It is a browser API for explicitly queuing a JS function for microtask processing; it is not needed to explain fetch. Do not imply that amj4 already exposes this API or introduce it again without a reason.
+
+### Exact fetch lifecycle clarified
+
+The source was inspected at `C:/Users/bokwoonchua/Documents/amj4/src/javascript/fetch.cpp` and `fetch.js`.
+
+1. JS `fetch` wrapper calls native `start` and awaits the metadata Promise.
+2. Native `start`, still executing inside the JS-to-C++ call, creates transport and Promise state, registers cleanup and headers entries, installs headers readiness, then calls `transport.start()` to launch the worker. It returns the metadata Promise.
+3. The calling async JS functions suspend; once surrounding JS finishes, evaluation/job execution returns to the owner loop.
+4. Worker stores headers under the transport mutex and signals readiness. This only marks the headers callback ready and wakes the owner; it does not invoke that callback.
+5. Owner dispatches the headers callback. It reads transport and resolves the metadata Promise (or rejects on error).
+6. Owner executes QuickJS jobs. The JS fetch wrapper resumes, constructs a **Response**, and returns it, settling fetch's Promise. Subsequent Promise work resumes the caller after `await fetch(url)`.
+7. JS requests `reader.read()`. Its wrapper calls native `read`, which creates a new Promise and registers a new one-shot scheduler entry for `deliverRead`. This is when the next callback is registered, NOT when bytes arrive.
+8. Native read installs its readiness handle under the transport mutex and checks for buffered chunks or transport completion. If already ready it signals the handle itself; otherwise the worker will signal it later. JS awaits the read and suspends.
+9. Owner dispatches that read callback, which takes one chunk or reports completion/error and settles the read Promise. The entry is removed before callback invocation. QuickJS jobs then resume JS consumption and the next read registers another entry.
+10. Repeat until `done: true`. Each registration is new, but the native callback implementation is the same `deliverRead` function.
+
+Worker byte arrivals only buffer bytes and notify an outstanding read, if one exists. No outstanding read means no new delivery callback registration. Multiple arrivals may precede a single read. Transport completion also wakes outstanding reads so EOF/errors can be delivered.
+
+## Fetch body API and async iteration
+
+- Correct browser spelling: `response.body.getReader()`, NOT `response.getReader()`.
+- QuickJS supports `for await...of` syntax and async iteration.
+- amj4 `src/javascript/fetch.js` supplies a custom `Body`/`Reader`, not a complete browser `ReadableStream`.
+- Its existing supported interface is `response.body.getReader()`, followed by `await reader.read()` returning `{ value: Uint8Array, done: boolean }`.
+- `Body` currently has no `[Symbol.asyncIterator]()`, so `for await (const chunk of response.body)` does NOT currently work.
+- Adding that JS interface atop the existing reader is sufficient; no C++ scheduler/HTTP changes are needed. Browser-like iteration acquires a reader, awaits reads, cancels on early exit (e.g. `break`), and releases the lock when done.
+- This was explained but **no fetch changes were requested or made**. Any walkthrough using `for await` is conditional on adding the iterator.
+
+## Communication lessons from this discussion
+
+- The user wants concrete actors and call sequences, not vague categories such as "other runnable JS or scheduled callbacks." In the fetch/timeout model, identify timers and HTTP callbacks followed by Promise continuations explicitly.
+- Explain new terms at introduction. Do not casually introduce jobs, microtasks, or continuations as if already understood.
+- Use **JavaScript-style pseudocode**, not Python, for explanatory code. Clearly distinguish conceptual pseudocode from real APIs and which thread runs it.
+- Do not conflate higher-level JS features with native scheduler consumers. For the user's intended SSE implementation, native callbacks resolve raw-byte read Promises; JS parses SSE events. There is no separate SSE event scheduler callback.
+
 ## Suggested continuation
 
-Ask what mechanism the user wants to unpack next, or continue with a concrete walkthrough of the readiness object, shared wakeup, and owner-thread wait loop. Distinguish existing behavior from proposed API choices. Only settle `callback_scheduler.hpp` and implement `.hpp`/`.cpp` once the user understands and approves the design.
+Continue from the user's fetch lifecycle walkthrough and answer the next specific uncertainty. The latest explanation covered initial evaluation, native registration before worker launch, headers-to-Promise-job execution, and registration of a fresh callback on each requested read. Do not implement fetch or its iterator unless asked. Distinguish existing behavior from proposed API choices. Only settle `callback_scheduler.hpp` and implement `.hpp`/`.cpp` once the user understands and approves the design.
 
 Do not port fetch or timeout yet; use their old implementations only to explain the scheduler's consumers. Do not reintroduce `RuntimeClass` or an opaque readiness function.
+
+## Possible future native event sources (not implementation commitments)
+
+Other browser-like modules that could use an owner-thread delivery mechanism include:
+
+| Module | What makes its callback ready |
+|---|---|
+| **WebSocket** | Connection opens, a message arrives, connection closes |
+| **Asynchronous file/storage APIs** | A file read/write or database operation completes |
+| **Web Workers** | Another worker posts a message |
+| **`MessageChannel` / `postMessage`** | A message is queued for delivery |
+| **UI/input events**—if you implement a UI | A mouse, keyboard, or window event arrives |
+| **`requestAnimationFrame`**—if you implement rendering | The next rendering opportunity occurs |
+
+These do **not** necessarily require one background thread each. They need a way to queue work for the owner thread; the underlying producer could be a worker thread, OS event loop, or another owner-thread callback.
+
+These are illustrative possibilities, not proof that each feature needs its own native scheduler callback. Higher-level JS features can build on existing byte/message delivery. CallbackScheduler delivers native readiness into JS; QuickJS’s job queue handles resulting Promise continuations.
