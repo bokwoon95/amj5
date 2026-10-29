@@ -1,1 +1,9 @@
 TODO: make context::Context compose well with other context::Context types, just like in Go.
+
+executeReadyCallbacks()
+
+waitForReadyCallbacks()
+
+callbackScheduler.dispatch()
+
+callbackScheduler.wait()

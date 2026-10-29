@@ -231,17 +231,62 @@ A **scheduler callback** here is the native function fetch registers to read tra
 Conceptual owner loop (JavaScript-style pseudocode, NOT actual API names or the exact old loop):
 
 ```js
-quickjs.evaluate(script);
-while (executionStillNeedsToContinue()) {
-    if (quickjs.hasPendingJobs()) {
-        quickjs.executePendingJob();
-    } else if (scheduler.hasReadyCallbacks()) {
-        scheduler.dispatchReadyCallbacks();
-    } else {
-        scheduler.waitForReadyCallbacks();
+// Actual JS:
+async function* reply() {
+    const response = await fetch(url);
+    const reader = response.body.getReader();
+    try {
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            yield value;
+        }
+    } finally {
+        reader.releaseLock();
     }
 }
 ```
+
+```js
+// JS-style pseudocode for the C++ host; real QuickJS API names.
+// Error handling and JS-value cleanup abbreviated.
+
+const iterator = JS_Call(jsContext, replyFunction, providerObject, 0, null);
+const nextFunction = JS_GetPropertyStr(jsContext, iterator, "next");
+
+while (true) {
+    const promise = JS_Call(jsContext, nextFunction, iterator, 0, null);
+    if (JS_IsException(promise)) {
+        throw JS_GetException(jsContext);
+    }
+    while (true) {
+        callbackScheduler.callReadyCallbacks();
+        let jobContext = null;
+        while (JS_IsJobPending(jsRuntime)) {
+            if (JS_ExecutePendingJob(jsRuntime, &jobContext) < 0) {
+                throw JS_GetException(jobContext);
+            }
+        }
+        const state = JS_PromiseState(jsContext, promise);
+        if (state === JS_PROMISE_REJECTED) {
+            throw JS_PromiseResult(jsContext, promise);
+        }
+        if (state === JS_PROMISE_FULFILLED) {
+            break;
+        }
+        callbackScheduler.waitForReadyCallbacks();
+    }
+    const result = JS_PromiseResult(jsContext, promise);
+    const done = JS_GetPropertyStr(jsContext, result, "done");
+    if (JS_ToBool(jsContext, done) === 1) {
+        break;
+    }
+    const value = JS_GetPropertyStr(jsContext, result, "value");
+    deliverToCaller(value);
+}
+```
+
+These are real API names. Only the surrounding syntax is JS-style; `&jobContext` retains C++’s output-parameter syntax. Native JS-value cleanup is omitted.
 
 Termination policy is intentionally unspecified in this pseudocode. Dispatch must still yield to pending QuickJS jobs between callbacks, as described above.
 

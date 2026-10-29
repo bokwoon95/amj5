@@ -53,6 +53,9 @@ find_package(Threads REQUIRED)
 # Stack traces.
 find_package(cpptrace CONFIG REQUIRED)
 
+# JavaScript engine.
+find_package(qjs CONFIG REQUIRED)
+
 # Select MSVC C/C++ runtime linkage; CMake generates the compiler flags.
 #
 # set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreadedDebugDLL) -> /MDd (dynamic debug
@@ -130,6 +133,12 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 else()
     message(FATAL_ERROR "Unsupported keyring platform")
 endif()
+
+## == src/javascript == ##
+
+add_library(amj_javascript STATIC src/javascript/callback_scheduler.cpp)
+list(APPEND amj_libraries amj_javascript)
+target_link_libraries(amj_javascript PUBLIC qjs PRIVATE Threads::Threads)
 
 ## == Tests == ##
 
