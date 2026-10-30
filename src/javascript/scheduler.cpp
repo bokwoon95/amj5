@@ -2,6 +2,7 @@
 
 #include "errors/errors.hpp"
 
+#include <limits>
 #include <quickjs.h>
 
 #include <algorithm>
@@ -106,7 +107,7 @@ std::expected<int64_t, errors::Error> Scheduler::registerCallback(
 
 errors::Error Scheduler::unregisterCallback(int64_t callbackID) {
     if (this_thread::get_id() != ownerThreadID) {
-        return errors::generic("Callback removal requires the owner thread");
+        return errors::generic("called unregisterCallback() outside owner thread");
     }
     std::map<int64_t, std::function<errors::Error()>>::node_type removed;
     {
@@ -135,16 +136,16 @@ errors::Error Scheduler::markReady(int64_t callbackID) {
 }
 
 std::expected<int64_t, errors::Error> Scheduler::registerCleanup(std::function<errors::Error()> cleanup) {
-    if (this_thread::get_id() != ownerThreadID || clearing) {
-        return std::unexpected(errors::generic("Cleanup registration requires the owner thread outside clear()"));
+    if (this_thread::get_id() != ownerThreadID) {
+        return std::unexpected(errors::generic("called registerCleanup() outside owner thread"));
     }
-    if (!cleanup) {
-        return std::unexpected(errors::Error{
-            .errorCode = std::make_error_code(std::errc::invalid_argument),
-            .errorMessage = "Cannot register an empty cleanup",
-        });
+    if (clearing) {
+        return std::unexpected(errors::generic("called registerCleanup() inside a clear()"));
     }
-    if (cleanups.size() >= 4096 || lastCleanupID >= 9007199254740991) {
+    if (cleanup == nullptr) {
+        return std::unexpected(errors::generic("Cannot register an empty cleanup"));
+    }
+    if (cleanups.size() >= 4096 || lastCleanupID >= std::numeric_limits<int64_t>::max()) {
         return std::unexpected(errors::generic("Pending cleanup limit or cleanup IDs exhausted"));
     }
     const int64_t cleanupID = lastCleanupID + 1;
