@@ -211,19 +211,22 @@ errors::Error Scheduler::dispatch() {
     }
     std::ranges::sort(ready);
     for (const std::pair<chrono::steady_clock::time_point, int64_t>& readyCallback : ready) {
-        std::map<int64_t, std::function<errors::Error()>>::node_type pending;
+        std::function<errors::Error()> callback;
         {
             const std::lock_guard<std::mutex> lock(mutex);
-            pending = callbacks.extract(readyCallback.second);
+            if (callbacks.contains(readyCallback.second)) {
+                callback = callbacks.at(readyCallback.second);
+                callbacks.erase(readyCallback.second);
+            }
             triggerTimes.erase(readyCallback.second);
             readyTimes.erase(readyCallback.second);
         }
-        if (pending.empty()) {
+        if (callback == nullptr) {
             continue; // Earlier callbacks may unregister other callbacks.
         }
         errors::Error error;
         try {
-            error = pending.mapped()();
+            error = callback();
         } catch (const std::exception& exception) {
             error = errors::message(std::string("Callback threw a C++ exception: ") + exception.what());
         } catch (...) {
