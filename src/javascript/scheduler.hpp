@@ -74,7 +74,7 @@ class Scheduler {
 
   private:
     JSContext* jsContext = nullptr;
-    std::thread::id ownerThread = {};
+    std::thread::id ownerThreadID = {};
     std::mutex mutex = {};
     std::condition_variable conditionVariable = {};
     // The mutex protects callback/deadline/notification maps shared with notify().

@@ -23,6 +23,7 @@
 namespace amj::javascript {
 namespace chrono = std::chrono;
 namespace errors = amj::errors;
+namespace this_thread = std::this_thread;
 namespace {
 
 class ErrorCategory final : public std::error_category {
@@ -50,10 +51,12 @@ std::error_code make_error_code(ErrorCode errorCode) {
     return std::error_code(static_cast<int>(errorCode), category);
 }
 
-Scheduler::Scheduler(JSContext* jsContext) : jsContext(jsContext), ownerThread(std::this_thread::get_id()) {
+Scheduler::Scheduler(JSContext* jsContext) {
     if (jsContext == nullptr) {
         throw std::invalid_argument("Scheduler requires a JS context");
     }
+    this->jsContext = jsContext;
+    this->ownerThreadID = this_thread::get_id();
 }
 
 Scheduler::~Scheduler() {
@@ -67,8 +70,11 @@ Scheduler::~Scheduler() {
     }
 }
 
-std::expected<int64_t, errors::Error> Scheduler::registerCallback(std::function<errors::Error()> callback, std::optional<chrono::steady_clock::time_point> callAtOption) {
-    if (std::this_thread::get_id() != ownerThread || clearing) {
+std::expected<int64_t, errors::Error> Scheduler::registerCallback(
+    std::function<errors::Error()> callback,
+    std::optional<chrono::steady_clock::time_point> callAtOption
+) {
+    if (this_thread::get_id() != ownerThreadID || clearing) {
         return std::unexpected(errors::Error{
             .errorCode = errors::ErrorCode::GenericError,
             .errorMessage = "Callback registration requires the owner thread outside clear()",
@@ -102,7 +108,7 @@ std::expected<int64_t, errors::Error> Scheduler::registerCallback(std::function<
 }
 
 errors::Error Scheduler::unregisterCallback(int64_t callbackID) {
-    if (std::this_thread::get_id() != ownerThread) {
+    if (this_thread::get_id() != ownerThreadID) {
         return errors::Error{
             .errorCode = errors::ErrorCode::GenericError,
             .errorMessage = "Callback removal requires the owner thread",
@@ -135,7 +141,7 @@ errors::Error Scheduler::notify(int64_t callbackID) {
 }
 
 std::expected<int64_t, errors::Error> Scheduler::registerCleanup(std::function<errors::Error()> cleanup) {
-    if (std::this_thread::get_id() != ownerThread || clearing) {
+    if (this_thread::get_id() != ownerThreadID || clearing) {
         return std::unexpected(errors::Error{
             .errorCode = errors::ErrorCode::GenericError,
             .errorMessage = "Cleanup registration requires the owner thread outside clear()",
@@ -160,7 +166,7 @@ std::expected<int64_t, errors::Error> Scheduler::registerCleanup(std::function<e
 }
 
 errors::Error Scheduler::cleanup(int64_t cleanupID) {
-    if (std::this_thread::get_id() != ownerThread) {
+    if (this_thread::get_id() != ownerThreadID) {
         return errors::Error{
             .errorCode = errors::ErrorCode::GenericError,
             .errorMessage = "Cleanup execution requires the owner thread",
@@ -197,7 +203,7 @@ errors::Error Scheduler::cleanup(int64_t cleanupID) {
 }
 
 errors::Error Scheduler::dispatch() {
-    if (std::this_thread::get_id() != ownerThread || clearing) {
+    if (this_thread::get_id() != ownerThreadID || clearing) {
         return errors::Error{
             .errorCode = errors::ErrorCode::GenericError,
             .errorMessage = "Dispatch requires the owner thread outside clear()",
@@ -279,7 +285,7 @@ errors::Error Scheduler::dispatch() {
 }
 
 errors::Error Scheduler::wait() {
-    if (std::this_thread::get_id() != ownerThread || clearing) {
+    if (this_thread::get_id() != ownerThreadID || clearing) {
         return errors::Error{
             .errorCode = errors::ErrorCode::GenericError,
             .errorMessage = "Wait requires the owner thread outside clear()",
@@ -327,7 +333,7 @@ errors::Error Scheduler::wait() {
 }
 
 errors::Error Scheduler::clear() {
-    if (std::this_thread::get_id() != ownerThread) {
+    if (this_thread::get_id() != ownerThreadID) {
         return errors::Error{
             .errorCode = errors::ErrorCode::GenericError,
             .errorMessage = "Clear requires the owner thread",

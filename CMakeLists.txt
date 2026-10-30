@@ -139,7 +139,6 @@ endif()
 
 add_library(amj_javascript STATIC
     src/javascript/scheduler.cpp
-    src/javascript/scratch.cpp
 )
 list(APPEND amj_libraries amj_javascript)
 target_link_libraries(amj_javascript PUBLIC amj_errors qjs PRIVATE Threads::Threads)
