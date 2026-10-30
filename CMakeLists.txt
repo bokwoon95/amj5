@@ -16,10 +16,11 @@ if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
 endif()
 
 # Tell LLVM clang where to find macOS system headers so clangd and clang-tidy
-# can work. Must be configured before project() compiler detection so that
-# compiler detection and compilation use the same SDK.
+# can work. It works by setting the CMake-native CMAKE_OSX_SYSROOT variable on
+# macOS.
 #
-# It works by setting the CMake-native CMAKE_OSX_SYSROOT variable on macOS.
+# Must be configured before project() compiler detection so that compiler
+# detection and compilation use the same SDK.
 if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND NOT CMAKE_OSX_SYSROOT)
     execute_process(COMMAND xcrun --sdk macosx --show-sdk-path OUTPUT_VARIABLE amj_macos_sdk OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
     if(NOT amj_sdk_result EQUAL 0)
@@ -35,11 +36,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Tell LLVM clang-cl where to find Windows system headers so clangd and
-# clang-tidy can work. Must be configured after project() compiler detection so
-# that we know whether the compiler is MSVC (LLVM's clang-cl counts as MSVC).
+# clang-tidy can work. It works by passing the INCLUDE environment variable
+# (configured by vcvars64.bat) to include_directories().
 #
-# It works by passing the INCLUDE environment variable (configured by
-# vcvars64.bat) to include_directories().
+# Must be configured after project() compiler detection so that we know whether
+# the compiler is MSVC (LLVM's clang-cl counts as MSVC).
 if(MSVC)
     if("$ENV{INCLUDE}" STREQUAL "")
         message(FATAL_ERROR "Use scripts/build.ps1 to initialize the MSVC environment")
@@ -51,10 +52,10 @@ endif()
 find_package(Threads REQUIRED)
 
 # Stack traces.
-find_package(cpptrace CONFIG REQUIRED)
+find_package(cpptrace REQUIRED)
 
 # JavaScript engine.
-find_package(qjs CONFIG REQUIRED)
+find_package(qjs REQUIRED)
 
 # Select MSVC C/C++ runtime linkage; CMake generates the compiler flags.
 #
@@ -136,7 +137,10 @@ endif()
 
 ## == src/javascript == ##
 
-add_library(amj_javascript STATIC src/javascript/callback_scheduler.cpp)
+add_library(amj_javascript STATIC
+    src/javascript/callback_scheduler.cpp
+    src/javascript/scratch.cpp
+)
 list(APPEND amj_libraries amj_javascript)
 target_link_libraries(amj_javascript PUBLIC qjs PRIVATE Threads::Threads)
 
