@@ -11,7 +11,7 @@ namespace amj::context {
 namespace chrono = std::chrono;
 namespace errors = amj::errors;
 
-std::optional<errors::Error> Context::errorOption() const {
+std::optional<errors::Error> Context::optionalError() const {
     if (cancellation.stop_requested()) {
         return errors::Error{
             .errorCode = std::make_error_code(std::errc::operation_canceled),

@@ -61,19 +61,15 @@ Scheduler::Scheduler(JSContext* jsContext) {
 }
 
 Scheduler::~Scheduler() {
-    try {
-        const errors::Error error = clear();
-        if (error.errorCode) {
-            std::terminate();
-        }
-    } catch (...) {
+    const errors::Error error = clear();
+    if (error.errorCode) {
         std::terminate();
     }
 }
 
 std::expected<int64_t, errors::Error> Scheduler::registerCallback(
     std::function<errors::Error()> callback,
-    std::optional<chrono::steady_clock::time_point> triggerTimeOption
+    std::optional<chrono::steady_clock::time_point> optionalTriggerTime
 ) {
     if (this_thread::get_id() != ownerThreadID) {
         return std::unexpected(errors::message("called registerCallback() outside owner thread"));
@@ -85,20 +81,15 @@ std::expected<int64_t, errors::Error> Scheduler::registerCallback(
         return std::unexpected(errors::message("registered a nullptr callback function"));
     }
     const std::lock_guard<std::mutex> lock(mutex);
-    if (lastCallbackID >= std::numeric_limits<int64_t>::max()) {
+    if (callbackIDCounter >= std::numeric_limits<int64_t>::max()) {
         return std::unexpected(errors::message("callbackIDs exhausted"));
     }
-    const int64_t callbackID = lastCallbackID + 1;
-    if (triggerTimeOption.has_value()) {
-        triggerTimes.emplace(callbackID, triggerTimeOption.value());
+    callbackIDCounter++;
+    const int64_t callbackID = callbackIDCounter;
+    callbacks.insert_or_assign(callbackID, callback);
+    if (optionalTriggerTime.has_value()) {
+        triggerTimes.insert_or_assign(callbackID, optionalTriggerTime.value());
     }
-    try {
-        callbacks.emplace(callbackID, std::move(callback));
-    } catch (...) {
-        triggerTimes.erase(callbackID);
-        throw;
-    }
-    lastCallbackID = callbackID;
     return callbackID;
 }
 
@@ -106,14 +97,10 @@ errors::Error Scheduler::unregisterCallback(int64_t callbackID) {
     if (this_thread::get_id() != ownerThreadID) {
         return errors::message("called unregisterCallback() outside owner thread");
     }
-    std::map<int64_t, std::function<errors::Error()>>::node_type removed;
-    {
-        const std::lock_guard<std::mutex> lock(mutex);
-        removed = callbacks.extract(callbackID);
-        triggerTimes.erase(callbackID);
-        readyTimes.erase(callbackID);
-    }
-    // Destroy callback captures outside the mutex, on the owner thread.
+    const std::lock_guard<std::mutex> lock(mutex);
+    callbacks.erase(callbackID);
+    triggerTimes.erase(callbackID);
+    readyTimes.erase(callbackID);
     return {};
 }
 
@@ -123,10 +110,10 @@ errors::Error Scheduler::markReady(int64_t callbackID) {
         if (!callbacks.contains(callbackID)) {
             return {};
         }
-        const bool inserted = readyTimes.try_emplace(callbackID, chrono::steady_clock::now()).second;
-        if (!inserted) {
+        if (readyTimes.contains(callbackID)) {
             return {};
         }
+        readyTimes.insert_or_assign(callbackID, chrono::steady_clock::now());
     }
     conditionVariable.notify_one();
     return {};
@@ -142,12 +129,12 @@ std::expected<int64_t, errors::Error> Scheduler::registerCleanup(std::function<e
     if (cleanup == nullptr) {
         return std::unexpected(errors::message("registered a nullptr cleanup function"));
     }
-    if (lastCleanupID >= std::numeric_limits<int64_t>::max()) {
+    if (cleanupIDCounter >= std::numeric_limits<int64_t>::max()) {
         return std::unexpected(errors::message("cleanupIDs exhausted"));
     }
-    const int64_t cleanupID = lastCleanupID + 1;
-    cleanups.emplace(cleanupID, std::move(cleanup));
-    lastCleanupID = cleanupID;
+    cleanupIDCounter++;
+    const int64_t cleanupID = cleanupIDCounter;
+    cleanups.insert_or_assign(cleanupID, cleanup);
     return cleanupID;
 }
 
@@ -202,17 +189,18 @@ errors::Error Scheduler::dispatch() {
         const std::lock_guard<std::mutex> lock(mutex);
         ready.reserve(callbacks.size());
         for (const std::pair<const int64_t, std::function<errors::Error()>>& callback : callbacks) {
-            std::optional<chrono::steady_clock::time_point> readyAtOption;
-            const std::map<int64_t, chrono::steady_clock::time_point>::const_iterator readiness = readyTimes.find(callback.first);
-            if (readiness != readyTimes.end()) {
-                readyAtOption = readiness->second;
+            std::optional<chrono::steady_clock::time_point> optionalReadyAt;
+            if (readyTimes.contains(callback.first)) {
+                optionalReadyAt = readyTimes.at(callback.first);
             }
-            const std::map<int64_t, chrono::steady_clock::time_point>::const_iterator deadline = triggerTimes.find(callback.first);
-            if (deadline != triggerTimes.end() && deadline->second <= now && (!readyAtOption.has_value() || deadline->second < readyAtOption.value())) {
-                readyAtOption = deadline->second;
+            if (triggerTimes.contains(callback.first)) {
+                const chrono::steady_clock::time_point deadline = triggerTimes.at(callback.first);
+                if (deadline <= now && (!optionalReadyAt.has_value() || deadline < optionalReadyAt.value())) {
+                    optionalReadyAt = deadline;
+                }
             }
-            if (readyAtOption.has_value()) {
-                ready.emplace_back(readyAtOption.value(), callback.first);
+            if (optionalReadyAt.has_value()) {
+                ready.emplace_back(optionalReadyAt.value(), callback.first);
             }
         }
     }
@@ -281,19 +269,19 @@ errors::Error Scheduler::wait() {
             return {};
         }
         const chrono::steady_clock::time_point now = chrono::steady_clock::now();
-        std::optional<chrono::steady_clock::time_point> nearestDeadlineOption;
+        std::optional<chrono::steady_clock::time_point> optionalNearestDeadline;
         for (const std::pair<const int64_t, chrono::steady_clock::time_point>& deadline : triggerTimes) {
             if (deadline.second <= now) {
                 return {};
             }
-            if (!nearestDeadlineOption.has_value() || deadline.second < nearestDeadlineOption.value()) {
-                nearestDeadlineOption = deadline.second;
+            if (!optionalNearestDeadline.has_value() || deadline.second < optionalNearestDeadline.value()) {
+                optionalNearestDeadline = deadline.second;
             }
         }
         // Check the predicate manually after notification, timeout, or spurious
         // wakeup. The shared mutex prevents a lost check-to-sleep notification.
-        if (nearestDeadlineOption.has_value()) {
-            conditionVariable.wait_until(lock, nearestDeadlineOption.value());
+        if (optionalNearestDeadline.has_value()) {
+            conditionVariable.wait_until(lock, optionalNearestDeadline.value());
         } else {
             conditionVariable.wait(lock);
         }
@@ -318,11 +306,11 @@ errors::Error Scheduler::clear() {
         readyTimes.clear();
     }
     errors::Error firstError;
-    std::optional<JSValue> firstJSExceptionOption;
+    std::optional<JSValue> optionalFirstJSException;
     // Preserve an exception already pending on entry while allowing cleanups to
     // call QuickJS with no exception pending.
     if (static_cast<int>(JS_HasException(jsContext)) != 0) {
-        firstJSExceptionOption = JS_GetException(jsContext);
+        optionalFirstJSException = JS_GetException(jsContext);
         firstError = errors::Error{
             .errorCode = ErrorCode::JSException,
             .errorMessage = "JavaScript exception was pending before clear()",
@@ -344,7 +332,7 @@ errors::Error Scheduler::clear() {
                 error.errorMessage = "Cleanup left a pending JavaScript exception";
             }
             if (!firstError.errorCode) {
-                firstJSExceptionOption = exception;
+                optionalFirstJSException = exception;
             } else {
                 JS_FreeValue(jsContext, exception);
             }
@@ -359,8 +347,8 @@ errors::Error Scheduler::clear() {
     pendingCallbacks.clear();
     pendingCleanups.clear();
     clearing = false;
-    if (firstJSExceptionOption.has_value()) {
-        JS_Throw(jsContext, firstJSExceptionOption.value());
+    if (optionalFirstJSException.has_value()) {
+        JS_Throw(jsContext, optionalFirstJSException.value());
     }
     return firstError;
 }

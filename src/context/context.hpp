@@ -19,7 +19,7 @@ struct Context {
 
     // nullopt means still active. Cancellation takes precedence over timeout.
     // Uses std::errc::operation_canceled and std::errc::timed_out codes.
-    [[nodiscard]] std::optional<errors::Error> errorOption() const;
+    [[nodiscard]] std::optional<errors::Error> optionalError() const;
 };
 
 } // namespace amj::context

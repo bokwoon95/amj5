@@ -16,7 +16,7 @@ namespace {
 
 TEST(Context, DefaultHasNoError) {
     const Context context;
-    EXPECT_FALSE(context.errorOption().has_value());
+    EXPECT_FALSE(context.optionalError().has_value());
 }
 
 TEST(Context, ExpiredDeadlineTimesOut) {
@@ -24,12 +24,12 @@ TEST(Context, ExpiredDeadlineTimesOut) {
         .cancellation = std::stop_token(),
         .deadline = chrono::steady_clock::now(),
     };
-    const std::optional<errors::Error> errorOption = context.errorOption();
-    if (!errorOption.has_value()) {
+    const std::optional<errors::Error> optionalError = context.optionalError();
+    if (!optionalError.has_value()) {
         FAIL() << "expected a context error";
         return;
     }
-    const errors::Error& error = errorOption.value();
+    const errors::Error& error = optionalError.value();
     EXPECT_EQ(error.errorCode, std::make_error_code(std::errc::timed_out));
     EXPECT_EQ(error.errorMessage, "context deadline exceeded");
     EXPECT_TRUE(error.stacktrace.empty());
@@ -42,12 +42,12 @@ TEST(Context, CancellationTakesPrecedenceOverTimeout) {
         .deadline = chrono::steady_clock::now(),
     };
     stopSource.request_stop();
-    const std::optional<errors::Error> errorOption = context.errorOption();
-    if (!errorOption.has_value()) {
+    const std::optional<errors::Error> optionalError = context.optionalError();
+    if (!optionalError.has_value()) {
         FAIL() << "expected a context error";
         return;
     }
-    const errors::Error& error = errorOption.value();
+    const errors::Error& error = optionalError.value();
     EXPECT_EQ(error.errorCode, std::make_error_code(std::errc::operation_canceled));
     EXPECT_EQ(error.errorMessage, "context canceled");
     EXPECT_TRUE(error.stacktrace.empty());

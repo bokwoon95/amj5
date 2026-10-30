@@ -50,6 +50,11 @@
 - For Apple, highly prefer the internal headers (sys/fcntl.h) over the portable ones (fcntl.h) to placate the clangd linter.
 - Never implicitly convert between integers and bools. Test integers with == 0 / != 0; test bools directly or with !. Class types with explicit operator bool() (e.g. std::error_code) may be tested directly.
 - Call std::optional<Thing> as "optionalThing", call std::expected<Thing, Error> as "thingResult". So when we unbox thingOption.value() or thingResult.value(), we can call the Thing as "thing".
+- Prefer simple container operations: .at() for indexed access, .push_back() for single-value appends, and .insert_or_assign() for map writes.
+- For map reads where absence is expected, use .contains() followed by .at().
+- Use emplacement only where modernize-use-emplace requires it; do not disable or suppress that check.
+- Preserve bulk/range operations such as .insert(end(), first, last); do not replace them with single-element loops.
+- Preserve existing semantics: guard writes with .contains() when existing entries must not be overwritten.
 
 ## Python
 - Use typed Python as much as possible.
