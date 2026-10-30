@@ -194,7 +194,7 @@ if [ "$changed" = true ] && [ ! -s "$source_list" ]; then
 fi
 # Cap concurrent clang-tidy processes to limit memory usage.
 workers=$(getconf _NPROCESSORS_ONLN 2>/dev/null) || workers=4
-if [ "$workers" -gt 4 ]; then workers=4; fi
+if [ "$workers" -gt 8 ]; then workers=8; fi
 if [ "$workers" -lt 1 ]; then workers=1; fi
 active=0
 source_count=0
@@ -217,15 +217,12 @@ while IFS= read -r source; do
                 printf '\nLinting: %s\n' "$source"
                 "$tidy" -p "$build" --fix "$source" || status=1
             else
-                # Serialize progress and completed diagnostics so file blocks stay intact.
-                while ! mkdir "$work/output.lock" 2>/dev/null; do sleep 0.1; done
-                printf 'Linting: %s\n' "$source"
-                rmdir "$work/output.lock"
+                # Serialize completed diagnostics so file blocks stay intact.
                 (
                     tidy_status=0
                     "$tidy" -p "$build" "$source" > "$work/$source_count.log" 2>&1 || tidy_status=$?
                     while ! mkdir "$work/output.lock" 2>/dev/null; do sleep 0.1; done
-                    printf '\nFinished linting: %s\n' "$source"
+                    printf '\nLinting: %s\n' "$source"
                     while IFS= read -r line || [ -n "$line" ]; do
                         printf '%s\n' "$line"
                     done < "$work/$source_count.log"
@@ -472,7 +469,7 @@ if ($fix) {
         }
     }
 } else {
-    $workers = [Math]::Max(1, [Math]::Min(4, [Environment]::ProcessorCount))
+    $workers = [Math]::Max(1, [Math]::Min(8, [Environment]::ProcessorCount))
     $files | ForEach-Object -Parallel {
         $file = $_
         $exitCode = 1
