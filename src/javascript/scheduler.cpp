@@ -61,8 +61,12 @@ Scheduler::Scheduler(JSContext* jsContext) {
 }
 
 Scheduler::~Scheduler() {
-    const errors::Error error = clear();
-    if (error.errorCode) {
+    try {
+        const errors::Error error = clear();
+        if (error.errorCode) {
+            std::terminate();
+        }
+    } catch (...) {
         std::terminate();
     }
 }
@@ -142,13 +146,14 @@ errors::Error Scheduler::cleanup(int64_t cleanupID) {
     if (this_thread::get_id() != ownerThreadID) {
         return errors::message("called cleanup() outside owner thread");
     }
-    const std::map<int64_t, std::function<errors::Error()>>::node_type pending = cleanups.extract(cleanupID);
-    if (pending.empty()) {
+    if (!cleanups.contains(cleanupID)) {
         return {};
     }
+    const std::function<errors::Error()> cleanup = cleanups.at(cleanupID);
+    cleanups.erase(cleanupID);
     errors::Error error;
     try {
-        error = pending.mapped()();
+        error = cleanup();
     } catch (const std::exception& exception) {
         error = errors::message(std::string("Cleanup threw a C++ exception: ") + exception.what());
     } catch (...) {
@@ -341,7 +346,7 @@ errors::Error Scheduler::clear() {
             error.errorMessage = "Cleanup returned JSException without a pending JavaScript exception";
         }
         if (!firstError.errorCode && error.errorCode) {
-            firstError = std::move(error);
+            firstError = error;
         }
     }
     pendingCallbacks.clear();
