@@ -49,14 +49,17 @@ class Scheduler {
     // nullopt means notification-only. An elapsed callAt or notify() makes the
     // callback runnable. IDs are never reused, including across clear().
     [[nodiscard]] std::expected<int64_t, errors::Error> registerCallback(std::function<errors::Error()> callback, std::optional<chrono::steady_clock::time_point> callAtOption);
+
     // Removes the callback and its notification/deadline; invokes no cleanup.
     // Unknown IDs are ignored.
     [[nodiscard]] errors::Error unregisterCallback(int64_t callbackID);
+
     // Thread-safe. Records the first notification and wakes wait(). Unknown or
     // removed IDs are ignored. Never executes JS or accesses the JS context.
     [[nodiscard]] errors::Error notify(int64_t callbackID);
 
     [[nodiscard]] std::expected<int64_t, errors::Error> registerCleanup(std::function<errors::Error()> cleanup);
+
     // Removes before invoking, so repeat/reentrant calls are no-ops. Does not
     // unregister callbacks: modules manage those independently.
     [[nodiscard]] errors::Error cleanup(int64_t cleanupID);
@@ -64,9 +67,11 @@ class Scheduler {
     // Dispatches a snapshot ordered by earliest notification/elapsed deadline,
     // then ID. Removes callbacks before invocation; yields to pending JS jobs.
     [[nodiscard]] errors::Error dispatch();
+
     // Executes no callbacks/JS. Returns for pending jobs or ready callbacks;
     // otherwise waits for notification/deadline. No callbacks means Stalled.
     [[nodiscard]] errors::Error wait();
+
     // Removes all callbacks/cleanups, attempts every cleanup, returns the first
     // failure, preserving its JS exception if applicable. Remains reusable.
     // Destructor calls clear() and terminates if it fails or throws.
