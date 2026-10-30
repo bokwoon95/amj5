@@ -77,7 +77,7 @@ struct LocalData {
 
 errors::Error makeError(DWORD code) {
     errors::Error error;
-    error.errorCode = ErrorCode::GenericError;
+    error.errorCode = errors::ErrorCode::GenericError;
     if (code == ERROR_NOT_FOUND) {
         error.errorCode = ErrorCode::NotFound;
     }

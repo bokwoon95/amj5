@@ -15,8 +15,6 @@ class ErrorCategory final : public std::error_category {
 
     std::string message(int value) const override {
         switch (value) {
-            case static_cast<int>(ErrorCode::GenericError):
-                return "Credential store operation failed";
             case static_cast<int>(ErrorCode::NotFound):
                 return "Secret not found";
             case static_cast<int>(ErrorCode::Unavailable):

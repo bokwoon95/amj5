@@ -20,21 +20,21 @@ namespace errors = amj::errors;
 namespace {
 
 TEST(KeyringErrors, CodesHaveStableCategoryAndMessages) {
-    const std::array<ErrorCode, 5> errorCodes = {ErrorCode::GenericError, ErrorCode::NotFound, ErrorCode::Unavailable, ErrorCode::SecretTooLong, ErrorCode::AccessDenied};
-    const std::array<std::string, 5> messages = {"Credential store operation failed", "Secret not found", "Credential store unavailable", "Secret exceeds credential store capacity", "Credential store access denied"};
+    const std::array<ErrorCode, 4> errorCodes = {ErrorCode::NotFound, ErrorCode::Unavailable, ErrorCode::SecretTooLong, ErrorCode::AccessDenied};
+    const std::array<std::string, 4> messages = {"Secret not found", "Credential store unavailable", "Secret exceeds credential store capacity", "Credential store access denied"};
     for (std::size_t index = 0; index < errorCodes.size(); ++index) {
         const std::error_code errorCode = make_error_code(errorCodes.at(index));
         EXPECT_STREQ(errorCode.category().name(), "amj.keyring");
         EXPECT_EQ(errorCode.value(), static_cast<int>(errorCodes.at(index)));
         EXPECT_EQ(errorCode.message(), messages.at(index));
-        EXPECT_EQ(&errorCode.category(), &make_error_code(ErrorCode::GenericError).category());
+        EXPECT_EQ(&errorCode.category(), &make_error_code(ErrorCode::NotFound).category());
         const errors::Error error = {
             .errorCode = errorCode,
         };
         EXPECT_TRUE(error.is(errorCodes.at(index)));
         EXPECT_NE(errorCode, std::make_error_code(std::errc::permission_denied));
     }
-    EXPECT_EQ(make_error_code(ErrorCode::GenericError).category().message(255), "Unknown keyring error");
+    EXPECT_EQ(make_error_code(ErrorCode::NotFound).category().message(255), "Unknown keyring error");
 }
 
 class KeyringIntegration : public testing::Test {

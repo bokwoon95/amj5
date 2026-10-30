@@ -7,6 +7,7 @@
 #include <string>
 #include <system_error>
 #include <tuple>
+#include <utility>
 
 namespace amj::errors {
 namespace {
@@ -71,6 +72,13 @@ std::string Error::toString() const {
         }
     }
     return text;
+}
+
+Error generic(std::string errorMessage) {
+    return Error{
+        .errorCode = ErrorCode::GenericError,
+        .errorMessage = std::move(errorMessage),
+    };
 }
 
 Error withStackTrace(Error error) {

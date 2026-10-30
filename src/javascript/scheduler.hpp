@@ -27,7 +27,7 @@ enum class ErrorCode : std::uint8_t {
 
 [[nodiscard]] std::error_code make_error_code(ErrorCode errorCode);
 
-// All methods except notify() require the constructing thread. Callbacks,
+// All methods except markReady() require the constructing thread. Callbacks,
 // cleanups, and destruction of their captures happen on that thread outside the
 // mutex. Workers need checked access (e.g. weak_ptr); the final owner must release
 // the scheduler on its constructing thread. The borrowed context must outlive it.
@@ -46,17 +46,18 @@ class Scheduler {
     Scheduler(Scheduler&&) = delete;
     Scheduler& operator=(Scheduler&&) = delete;
 
-    // nullopt means notification-only. An elapsed callAt or notify() makes the
+    // nullopt means readiness is explicit. An elapsed callAt or markReady() makes the
     // callback runnable. IDs are never reused, including across clear().
     [[nodiscard]] std::expected<int64_t, errors::Error> registerCallback(std::function<errors::Error()> callback, std::optional<chrono::steady_clock::time_point> callAtOption);
 
-    // Removes the callback and its notification/deadline; invokes no cleanup.
+    // Removes the callback and its readiness timestamp/deadline; invokes no cleanup.
     // Unknown IDs are ignored.
     [[nodiscard]] errors::Error unregisterCallback(int64_t callbackID);
 
-    // Thread-safe. Records the first notification and wakes wait(). Unknown or
-    // removed IDs are ignored. Never executes JS or accesses the JS context.
-    [[nodiscard]] errors::Error notify(int64_t callbackID);
+    // Thread-safe. Records when first marked ready and wakes wait(). Repeated
+    // calls coalesce; unknown/removed IDs are ignored. Never executes JS or
+    // accesses the JS context.
+    [[nodiscard]] errors::Error markReady(int64_t callbackID);
 
     [[nodiscard]] std::expected<int64_t, errors::Error> registerCleanup(std::function<errors::Error()> cleanup);
 
@@ -64,12 +65,12 @@ class Scheduler {
     // unregister callbacks: modules manage those independently.
     [[nodiscard]] errors::Error cleanup(int64_t cleanupID);
 
-    // Dispatches a snapshot ordered by earliest notification/elapsed deadline,
+    // Dispatches a snapshot ordered by earliest readiness timestamp/elapsed deadline,
     // then ID. Removes callbacks before invocation; yields to pending JS jobs.
     [[nodiscard]] errors::Error dispatch();
 
     // Executes no callbacks/JS. Returns for pending jobs or ready callbacks;
-    // otherwise waits for notification/deadline. No callbacks means Stalled.
+    // otherwise waits for explicit readiness or a deadline. No callbacks means Stalled.
     [[nodiscard]] errors::Error wait();
 
     // Removes all callbacks/cleanups, attempts every cleanup, returns the first
@@ -82,10 +83,10 @@ class Scheduler {
     std::thread::id ownerThreadID = {};
     std::mutex mutex = {};
     std::condition_variable conditionVariable = {};
-    // The mutex protects callback/deadline/notification maps shared with notify().
+    // The mutex protects callback/deadline/readiness maps shared with markReady().
     std::map<int64_t, std::function<errors::Error()>> callbacks = {};
     std::map<int64_t, chrono::steady_clock::time_point> callAt = {};
-    std::map<int64_t, chrono::steady_clock::time_point> notifiedAt = {};
+    std::map<int64_t, chrono::steady_clock::time_point> markedReadyAt = {};
     std::map<int64_t, std::function<errors::Error()>> cleanups = {};
     int64_t lastCallbackID = 0;
     int64_t lastCleanupID = 0;

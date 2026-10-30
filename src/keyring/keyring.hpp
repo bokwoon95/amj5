@@ -35,8 +35,7 @@ namespace amj::keyring {
 namespace errors = amj::errors;
 
 enum class ErrorCode : std::uint8_t {
-    GenericError = 1,
-    NotFound,
+    NotFound = 1,
     Unavailable,
     SecretTooLong,
     AccessDenied,

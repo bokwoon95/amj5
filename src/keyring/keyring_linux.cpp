@@ -60,7 +60,7 @@ errors::Error makeError(GError* error) {
         };
     }
     errors::Error result = {
-        .errorCode = ErrorCode::GenericError,
+        .errorCode = errors::ErrorCode::GenericError,
         .errorMessage = error->message,
         .detail = error->code,
     };
@@ -82,10 +82,7 @@ errors::Error save(const std::string& service, const std::string& user, const st
         return makeError(error);
     }
     if (stored == 0) {
-        return errors::Error{
-            .errorCode = ErrorCode::GenericError,
-            .errorMessage = "Failed to store secret.",
-        };
+        return errors::generic("Failed to store secret.");
     }
     return {};
 }
