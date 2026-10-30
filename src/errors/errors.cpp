@@ -74,7 +74,7 @@ std::string Error::toString() const {
     return text;
 }
 
-Error generic(std::string errorMessage) {
+Error message(std::string errorMessage) {
     return Error{
         .errorCode = ErrorCode::GenericError,
         .errorMessage = std::move(errorMessage),

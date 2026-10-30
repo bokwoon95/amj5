@@ -76,10 +76,10 @@ std::expected<int64_t, errors::Error> Scheduler::registerCallback(
     std::optional<chrono::steady_clock::time_point> callAtOption
 ) {
     if (this_thread::get_id() != ownerThreadID) {
-        return std::unexpected(errors::generic("called registerCallback() outside owner thread"));
+        return std::unexpected(errors::message("called registerCallback() outside owner thread"));
     }
     if (clearing) {
-        return std::unexpected(errors::generic("called registerCallback() inside a clear()"));
+        return std::unexpected(errors::message("called registerCallback() inside a clear()"));
     }
     if (!callback) {
         return std::unexpected(errors::Error{
@@ -89,7 +89,7 @@ std::expected<int64_t, errors::Error> Scheduler::registerCallback(
     }
     const std::lock_guard<std::mutex> lock(mutex);
     if (callbacks.size() >= 4096 || lastCallbackID >= 9007199254740991) {
-        return std::unexpected(errors::generic("Pending callback limit or callback IDs exhausted"));
+        return std::unexpected(errors::message("Pending callback limit or callback IDs exhausted"));
     }
     const int64_t callbackID = lastCallbackID + 1;
     if (callAtOption.has_value()) {
@@ -107,7 +107,7 @@ std::expected<int64_t, errors::Error> Scheduler::registerCallback(
 
 errors::Error Scheduler::unregisterCallback(int64_t callbackID) {
     if (this_thread::get_id() != ownerThreadID) {
-        return errors::generic("called unregisterCallback() outside owner thread");
+        return errors::message("called unregisterCallback() outside owner thread");
     }
     std::map<int64_t, std::function<errors::Error()>>::node_type removed;
     {
@@ -137,16 +137,16 @@ errors::Error Scheduler::markReady(int64_t callbackID) {
 
 std::expected<int64_t, errors::Error> Scheduler::registerCleanup(std::function<errors::Error()> cleanup) {
     if (this_thread::get_id() != ownerThreadID) {
-        return std::unexpected(errors::generic("called registerCleanup() outside owner thread"));
+        return std::unexpected(errors::message("called registerCleanup() outside owner thread"));
     }
     if (clearing) {
-        return std::unexpected(errors::generic("called registerCleanup() inside a clear()"));
+        return std::unexpected(errors::message("called registerCleanup() inside a clear()"));
     }
     if (cleanup == nullptr) {
-        return std::unexpected(errors::generic("registered a nullptr cleanup function"));
+        return std::unexpected(errors::message("registered a nullptr cleanup function"));
     }
     if (lastCleanupID >= std::numeric_limits<int64_t>::max()) {
-        return std::unexpected(errors::generic("cleanupIDs exhausted"));
+        return std::unexpected(errors::message("cleanupIDs exhausted"));
     }
     const int64_t cleanupID = lastCleanupID + 1;
     cleanups.emplace(cleanupID, std::move(cleanup));
@@ -156,7 +156,7 @@ std::expected<int64_t, errors::Error> Scheduler::registerCleanup(std::function<e
 
 errors::Error Scheduler::cleanup(int64_t cleanupID) {
     if (this_thread::get_id() != ownerThreadID) {
-        return errors::generic("Cleanup execution requires the owner thread");
+        return errors::message("Cleanup execution requires the owner thread");
     }
     const std::map<int64_t, std::function<errors::Error()>>::node_type pending = cleanups.extract(cleanupID);
     if (pending.empty()) {
@@ -166,9 +166,9 @@ errors::Error Scheduler::cleanup(int64_t cleanupID) {
     try {
         error = pending.mapped()();
     } catch (const std::exception& exception) {
-        error = errors::generic(std::string("Cleanup threw a C++ exception: ") + exception.what());
+        error = errors::message(std::string("Cleanup threw a C++ exception: ") + exception.what());
     } catch (...) {
-        error = errors::generic("Cleanup threw an unknown C++ exception");
+        error = errors::message("Cleanup threw an unknown C++ exception");
     }
     if (static_cast<int>(JS_HasException(jsContext)) != 0) {
         error.errorCode = ErrorCode::JSException;
@@ -184,7 +184,7 @@ errors::Error Scheduler::cleanup(int64_t cleanupID) {
 
 errors::Error Scheduler::dispatch() {
     if (this_thread::get_id() != ownerThreadID || clearing) {
-        return errors::generic("Dispatch requires the owner thread outside clear()");
+        return errors::message("Dispatch requires the owner thread outside clear()");
     }
     if (static_cast<int>(JS_HasException(jsContext)) != 0) {
         return errors::Error{
@@ -232,9 +232,9 @@ errors::Error Scheduler::dispatch() {
         try {
             error = pending.mapped()();
         } catch (const std::exception& exception) {
-            error = errors::generic(std::string("Callback threw a C++ exception: ") + exception.what());
+            error = errors::message(std::string("Callback threw a C++ exception: ") + exception.what());
         } catch (...) {
-            error = errors::generic("Callback threw an unknown C++ exception");
+            error = errors::message("Callback threw an unknown C++ exception");
         }
         if (static_cast<int>(JS_HasException(jsContext)) != 0) {
             error.errorCode = ErrorCode::JSException;
@@ -257,7 +257,7 @@ errors::Error Scheduler::dispatch() {
 
 errors::Error Scheduler::wait() {
     if (this_thread::get_id() != ownerThreadID || clearing) {
-        return errors::generic("Wait requires the owner thread outside clear()");
+        return errors::message("Wait requires the owner thread outside clear()");
     }
     if (static_cast<int>(JS_HasException(jsContext)) != 0) {
         return errors::Error{
@@ -302,7 +302,7 @@ errors::Error Scheduler::wait() {
 
 errors::Error Scheduler::clear() {
     if (this_thread::get_id() != ownerThreadID) {
-        return errors::generic("Clear requires the owner thread");
+        return errors::message("Clear requires the owner thread");
     }
     if (clearing) {
         return {};
@@ -333,9 +333,9 @@ errors::Error Scheduler::clear() {
         try {
             error = pending.second();
         } catch (const std::exception& exception) {
-            error = errors::generic(std::string("Cleanup threw a C++ exception: ") + exception.what());
+            error = errors::message(std::string("Cleanup threw a C++ exception: ") + exception.what());
         } catch (...) {
-            error = errors::generic("Cleanup threw an unknown C++ exception");
+            error = errors::message("Cleanup threw an unknown C++ exception");
         }
         if (static_cast<int>(JS_HasException(jsContext)) != 0) {
             const JSValue exception = JS_GetException(jsContext);

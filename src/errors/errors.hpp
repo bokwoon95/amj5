@@ -40,7 +40,7 @@ struct Error {
     [[nodiscard]] std::string toString() const;
 };
 
-[[nodiscard]] Error generic(std::string errorMessage);
+[[nodiscard]] Error message(std::string errorMessage);
 
 // Captures at most 30 runtime frames; does nothing if the chain already has a trace.
 // Call at the origin of an unexpected failure, not at every propagation site.
