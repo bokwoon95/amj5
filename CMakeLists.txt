@@ -138,11 +138,11 @@ endif()
 ## == src/javascript == ##
 
 add_library(amj_javascript STATIC
-    src/javascript/callback_scheduler.cpp
+    src/javascript/scheduler.cpp
     src/javascript/scratch.cpp
 )
 list(APPEND amj_libraries amj_javascript)
-target_link_libraries(amj_javascript PUBLIC qjs PRIVATE Threads::Threads)
+target_link_libraries(amj_javascript PUBLIC amj_errors qjs PRIVATE Threads::Threads)
 
 ## == Tests == ##
 

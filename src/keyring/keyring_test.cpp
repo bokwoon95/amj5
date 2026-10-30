@@ -64,13 +64,13 @@ class KeyringIntegration : public testing::Test {
     void TearDown() override {
         for (const std::string& entryService : services) {
             for (const std::string& user : users) {
-                const std::expected<void, errors::Error> removeResult = remove(entryService, user);
-                if (removeResult.has_value() || removeResult.error().is(ErrorCode::NotFound)) {
+                const errors::Error removeError = remove(entryService, user);
+                if (!removeError.errorCode || removeError.is(ErrorCode::NotFound)) {
                     continue;
                 }
-                std::cerr << "Keyring cleanup failed; remove this test entry manually: service=" << entryService << ", user=" << user << ": " << removeResult.error().toString() << '\n';
-                if (!removeResult.error().is(ErrorCode::AccessDenied) && !removeResult.error().is(ErrorCode::Unavailable)) {
-                    ADD_FAILURE() << "Unexpected keyring cleanup error: " << removeResult.error().toString();
+                std::cerr << "Keyring cleanup failed; remove this test entry manually: service=" << entryService << ", user=" << user << ": " << removeError.toString() << '\n';
+                if (!removeError.is(ErrorCode::AccessDenied) && !removeError.is(ErrorCode::Unavailable)) {
+                    ADD_FAILURE() << "Unexpected keyring cleanup error: " << removeError.toString();
                 }
             }
         }
@@ -84,12 +84,12 @@ TEST_F(KeyringIntegration, MissingEntriesReportNotFound) {
     }
     ASSERT_FALSE(loadResult.has_value());
     EXPECT_TRUE(loadResult.error().is(ErrorCode::NotFound)) << loadResult.error().toString();
-    const std::expected<void, errors::Error> removeResult = remove(service, users.at(0));
-    if (!removeResult.has_value() && (removeResult.error().is(ErrorCode::AccessDenied) || removeResult.error().is(ErrorCode::Unavailable))) {
-        GTEST_SKIP() << removeResult.error().toString();
+    const errors::Error removeError = remove(service, users.at(0));
+    if (removeError.errorCode && (removeError.is(ErrorCode::AccessDenied) || removeError.is(ErrorCode::Unavailable))) {
+        GTEST_SKIP() << removeError.toString();
     }
-    ASSERT_FALSE(removeResult.has_value());
-    EXPECT_TRUE(removeResult.error().is(ErrorCode::NotFound)) << removeResult.error().toString();
+    ASSERT_TRUE(static_cast<bool>(removeError.errorCode));
+    EXPECT_TRUE(removeError.is(ErrorCode::NotFound)) << removeError.toString();
 }
 
 TEST_F(KeyringIntegration, RoundTripOverwriteUnicodeAndSizes) {
@@ -99,12 +99,12 @@ TEST_F(KeyringIntegration, RoundTripOverwriteUnicodeAndSizes) {
     const std::vector<std::string> values = {"original", "replacement-\xE5\xAF\x86\xE7\xA0\x81", "short", std::string(2560, 'a'), std::string(2561, 'b'), std::string(12000, 'c'), "small-again", "final"};
     for (const std::string& value : values) {
         SCOPED_TRACE("Secret size: " + std::to_string(value.size()));
-        const std::expected<void, errors::Error> saveResult = save(service, users.at(0), value);
-        if (!saveResult.has_value()) {
-            if (saveResult.error().is(ErrorCode::AccessDenied) || saveResult.error().is(ErrorCode::Unavailable)) {
-                GTEST_SKIP() << "save: " << saveResult.error().toString();
+        const errors::Error saveError = save(service, users.at(0), value);
+        if (saveError.errorCode) {
+            if (saveError.is(ErrorCode::AccessDenied) || saveError.is(ErrorCode::Unavailable)) {
+                GTEST_SKIP() << "save: " << saveError.toString();
             }
-            FAIL() << "save: " << saveResult.error().toString();
+            FAIL() << "save: " << saveError.toString();
         }
         const std::expected<std::string, errors::Error> loadResult = load(service, users.at(0));
         if (!loadResult.has_value()) {
@@ -116,12 +116,12 @@ TEST_F(KeyringIntegration, RoundTripOverwriteUnicodeAndSizes) {
         // Do not print credential contents on mismatch.
         EXPECT_TRUE(loadResult.value() == value) << "Loaded secret differs from saved bytes";
     }
-    const std::expected<void, errors::Error> removeResult = remove(service, users.at(0));
-    if (!removeResult.has_value()) {
-        if (removeResult.error().is(ErrorCode::AccessDenied) || removeResult.error().is(ErrorCode::Unavailable)) {
-            GTEST_SKIP() << "remove: " << removeResult.error().toString();
+    const errors::Error removeError = remove(service, users.at(0));
+    if (removeError.errorCode) {
+        if (removeError.is(ErrorCode::AccessDenied) || removeError.is(ErrorCode::Unavailable)) {
+            GTEST_SKIP() << "remove: " << removeError.toString();
         }
-        FAIL() << "remove: " << removeResult.error().toString();
+        FAIL() << "remove: " << removeError.toString();
     }
     const std::expected<std::string, errors::Error> loadResult = load(service, users.at(0));
     if (!loadResult.has_value() && (loadResult.error().is(ErrorCode::AccessDenied) || loadResult.error().is(ErrorCode::Unavailable))) {
@@ -135,22 +135,22 @@ TEST_F(KeyringIntegration, ServicesAndUsersAreIndependent) {
     int valueIndex = 0;
     for (const std::string& entryService : services) {
         for (const std::string& user : users) {
-            const std::expected<void, errors::Error> saveResult = save(entryService, user, "value-" + std::to_string(valueIndex));
-            if (!saveResult.has_value()) {
-                if (saveResult.error().is(ErrorCode::AccessDenied) || saveResult.error().is(ErrorCode::Unavailable)) {
-                    GTEST_SKIP() << "save: " << saveResult.error().toString();
+            const errors::Error saveError = save(entryService, user, "value-" + std::to_string(valueIndex));
+            if (saveError.errorCode) {
+                if (saveError.is(ErrorCode::AccessDenied) || saveError.is(ErrorCode::Unavailable)) {
+                    GTEST_SKIP() << "save: " << saveError.toString();
                 }
-                FAIL() << "save: " << saveResult.error().toString();
+                FAIL() << "save: " << saveError.toString();
             }
             ++valueIndex;
         }
     }
-    const std::expected<void, errors::Error> overwriteResult = save(service, users.at(0), "changed");
-    if (!overwriteResult.has_value()) {
-        if (overwriteResult.error().is(ErrorCode::AccessDenied) || overwriteResult.error().is(ErrorCode::Unavailable)) {
-            GTEST_SKIP() << "overwrite: " << overwriteResult.error().toString();
+    const errors::Error overwriteError = save(service, users.at(0), "changed");
+    if (overwriteError.errorCode) {
+        if (overwriteError.is(ErrorCode::AccessDenied) || overwriteError.is(ErrorCode::Unavailable)) {
+            GTEST_SKIP() << "overwrite: " << overwriteError.toString();
         }
-        FAIL() << "overwrite: " << overwriteResult.error().toString();
+        FAIL() << "overwrite: " << overwriteError.toString();
     }
     valueIndex = 0;
     for (const std::string& entryService : services) {
@@ -176,12 +176,12 @@ TEST_F(KeyringIntegration, ServicesAndUsersAreIndependent) {
 #if defined(_WIN32) || defined(__APPLE__)
 TEST_F(KeyringIntegration, EmbeddedNulBytesRoundTrip) {
     const std::string value("before\0after\0", 13);
-    const std::expected<void, errors::Error> saveResult = save(service, users.at(0), value);
-    if (!saveResult.has_value()) {
-        if (saveResult.error().is(ErrorCode::AccessDenied) || saveResult.error().is(ErrorCode::Unavailable)) {
-            GTEST_SKIP() << "save: " << saveResult.error().toString();
+    const errors::Error saveError = save(service, users.at(0), value);
+    if (saveError.errorCode) {
+        if (saveError.is(ErrorCode::AccessDenied) || saveError.is(ErrorCode::Unavailable)) {
+            GTEST_SKIP() << "save: " << saveError.toString();
         }
-        FAIL() << "save: " << saveResult.error().toString();
+        FAIL() << "save: " << saveError.toString();
     }
     const std::expected<std::string, errors::Error> loadResult = load(service, users.at(0));
     if (!loadResult.has_value()) {
@@ -196,18 +196,18 @@ TEST_F(KeyringIntegration, EmbeddedNulBytesRoundTrip) {
 
 #if defined(_WIN32)
 TEST_F(KeyringIntegration, OversizedWritePreservesExistingSecret) {
-    const std::expected<void, errors::Error> saveResult = save(service, users.at(0), "original");
-    if (!saveResult.has_value()) {
-        if (saveResult.error().is(ErrorCode::AccessDenied) || saveResult.error().is(ErrorCode::Unavailable)) {
-            GTEST_SKIP() << "save: " << saveResult.error().toString();
+    const errors::Error saveError = save(service, users.at(0), "original");
+    if (saveError.errorCode) {
+        if (saveError.is(ErrorCode::AccessDenied) || saveError.is(ErrorCode::Unavailable)) {
+            GTEST_SKIP() << "save: " << saveError.toString();
         }
-        FAIL() << "save: " << saveResult.error().toString();
+        FAIL() << "save: " << saveError.toString();
     }
     // DPAPI overhead means even plaintext at the ciphertext ceiling cannot fit.
     for (const std::size_t size : {18944U, 18945U}) {
-        const std::expected<void, errors::Error> oversizedResult = save(service, users.at(0), std::string(size, 'x'));
-        ASSERT_FALSE(oversizedResult.has_value());
-        EXPECT_TRUE(oversizedResult.error().is(ErrorCode::SecretTooLong)) << oversizedResult.error().toString();
+        const errors::Error oversizedError = save(service, users.at(0), std::string(size, 'x'));
+        ASSERT_TRUE(static_cast<bool>(oversizedError.errorCode));
+        EXPECT_TRUE(oversizedError.is(ErrorCode::SecretTooLong)) << oversizedError.toString();
         const std::expected<std::string, errors::Error> loadResult = load(service, users.at(0));
         if (!loadResult.has_value()) {
             if (loadResult.error().is(ErrorCode::AccessDenied) || loadResult.error().is(ErrorCode::Unavailable)) {

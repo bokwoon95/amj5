@@ -59,10 +59,10 @@ enum class ErrorCode : std::uint8_t {
 // in Credential Manager; larger values are DPAPI-encrypted and split across the
 // blob and attributes. Ciphertext must fit within 18,944 bytes (plaintext less).
 // Linux retains libsecret's UTF-8, NUL-terminated secret text semantics.
-[[nodiscard]] std::expected<void, errors::Error> save(const std::string& service, const std::string& user, const std::string& value);
+[[nodiscard]] errors::Error save(const std::string& service, const std::string& user, const std::string& value);
 
 // Deleting a missing entry reports NotFound.
-[[nodiscard]] std::expected<void, errors::Error> remove(const std::string& service, const std::string& user);
+[[nodiscard]] errors::Error remove(const std::string& service, const std::string& user);
 
 // Probes the native Linux/macOS credential service. Windows Credential Manager is a
 // built-in component, so availability always returns true there.

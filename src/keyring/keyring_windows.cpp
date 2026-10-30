@@ -126,21 +126,21 @@ std::expected<std::wstring, errors::Error> makeTargetName(const std::string& ser
 
 } // namespace
 
-std::expected<void, errors::Error> save(const std::string& service, const std::string& user, const std::string& value) {
+errors::Error save(const std::string& service, const std::string& user, const std::string& value) {
     std::expected<std::wstring, errors::Error> targetResult = makeTargetName(service, user);
     if (!targetResult.has_value()) {
-        return std::unexpected(targetResult.error());
+        return targetResult.error();
     }
     std::expected<std::wstring, errors::Error> usernameResult = utf8ToWide(user);
     if (!usernameResult.has_value()) {
-        return std::unexpected(usernameResult.error());
+        return usernameResult.error();
     }
     // DPAPI only adds overhead, so oversized plaintext cannot possibly fit.
     if (value.size() > maxEncryptedSize) {
-        return std::unexpected(errors::Error{
+        return errors::Error{
             .errorCode = ErrorCode::SecretTooLong,
             .errorMessage = "Secret exceeds the 18,944-byte encrypted credential capacity",
-        });
+        };
     }
 
     CREDENTIALW credential = {};
@@ -162,16 +162,16 @@ std::expected<void, errors::Error> save(const std::string& service, const std::s
         input.pbData = secret.data();
         LocalData output;
         if (CryptProtectData(&input, L"keyring encrypted data", nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &output.blob) == FALSE) {
-            return std::unexpected(makeError(GetLastError()));
+            return makeError(GetLastError());
         }
         if (output.blob.cbData > maxEncryptedSize) {
-            return std::unexpected(errors::Error{
+            return errors::Error{
                 .errorCode = ErrorCode::SecretTooLong,
                 .errorMessage = "DPAPI-encrypted secret exceeds 18,944 bytes",
-            });
+            };
         }
         if (output.blob.pbData == nullptr || output.blob.cbData <= CRED_MAX_CREDENTIAL_BLOB_SIZE) {
-            return std::unexpected(makeError(ERROR_INVALID_DATA));
+            return makeError(ERROR_INVALID_DATA);
         }
         const std::span<const BYTE> encryptedBytes(output.blob.pbData, output.blob.cbData);
         encrypted.assign(encryptedBytes.begin(), encryptedBytes.end());
@@ -195,7 +195,7 @@ std::expected<void, errors::Error> save(const std::string& service, const std::s
         credential.Attributes = attributes.data();
     }
     if (CredWriteW(&credential, 0) == FALSE) {
-        return std::unexpected(makeError(GetLastError()));
+        return makeError(GetLastError());
     }
     return {};
 }
@@ -274,13 +274,13 @@ std::expected<std::string, errors::Error> load(const std::string& service, const
     return std::string(plaintext.begin(), plaintext.end());
 }
 
-std::expected<void, errors::Error> remove(const std::string& service, const std::string& user) {
+errors::Error remove(const std::string& service, const std::string& user) {
     const std::expected<std::wstring, errors::Error> targetResult = makeTargetName(service, user);
     if (!targetResult.has_value()) {
-        return std::unexpected(targetResult.error());
+        return targetResult.error();
     }
     if (CredDeleteW(targetResult.value().c_str(), CRED_TYPE_GENERIC, 0) == FALSE) {
-        return std::unexpected(makeError(GetLastError()));
+        return makeError(GetLastError());
     }
     return {};
 }

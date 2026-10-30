@@ -115,25 +115,25 @@ std::expected<CFMutableDictionaryRef, errors::Error> createQuery(const std::stri
 
 } // namespace
 
-std::expected<void, errors::Error> save(const std::string& service, const std::string& user, const std::string& value) {
+errors::Error save(const std::string& service, const std::string& user, const std::string& value) {
     const std::expected<CFMutableDictionaryRef, errors::Error> queryResult = createQuery(service, user);
     if (!queryResult.has_value()) {
-        return std::unexpected(queryResult.error());
+        return queryResult.error();
     }
     const ScopedCFRef<CFMutableDictionaryRef> query(queryResult.value());
     if (value.size() > static_cast<std::size_t>(std::numeric_limits<CFIndex>::max())) {
-        return std::unexpected(errors::Error{
+        return errors::Error{
             .errorCode = ErrorCode::GenericError,
             .errorMessage = "Secret too long",
-        });
+        };
     }
     const std::vector<UInt8> secret(value.begin(), value.end());
     const ScopedCFRef<CFDataRef> data(CFDataCreate(kCFAllocatorDefault, secret.data(), static_cast<CFIndex>(secret.size())));
     if (data.value == nullptr) {
-        return std::unexpected(errors::Error{
+        return errors::Error{
             .errorCode = ErrorCode::GenericError,
             .errorMessage = "Failed to create secret data",
-        });
+        };
     }
     CFDictionaryAddValue(query.value, kSecValueData, data.value);
     OSStatus status = SecItemAdd(query.value, nullptr);
@@ -141,16 +141,16 @@ std::expected<void, errors::Error> save(const std::string& service, const std::s
         CFDictionaryRemoveValue(query.value, kSecValueData);
         const ScopedCFRef<CFMutableDictionaryRef> attributes(CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
         if (attributes.value == nullptr) {
-            return std::unexpected(errors::Error{
+            return errors::Error{
                 .errorCode = ErrorCode::GenericError,
                 .errorMessage = "Failed to create secret attributes",
-            });
+            };
         }
         CFDictionaryAddValue(attributes.value, kSecValueData, data.value);
         status = SecItemUpdate(query.value, attributes.value);
     }
     if (status != errSecSuccess) {
-        return std::unexpected(makeError(status));
+        return makeError(status);
     }
     return {};
 }
@@ -190,15 +190,15 @@ std::expected<std::string, errors::Error> load(const std::string& service, const
     return std::string(plaintext.begin(), plaintext.end());
 }
 
-std::expected<void, errors::Error> remove(const std::string& service, const std::string& user) {
+errors::Error remove(const std::string& service, const std::string& user) {
     const std::expected<CFMutableDictionaryRef, errors::Error> queryResult = createQuery(service, user);
     if (!queryResult.has_value()) {
-        return std::unexpected(queryResult.error());
+        return queryResult.error();
     }
     const ScopedCFRef<CFMutableDictionaryRef> query(queryResult.value());
     const OSStatus status = SecItemDelete(query.value);
     if (status != errSecSuccess) {
-        return std::unexpected(makeError(status));
+        return makeError(status);
     }
     return {};
 }

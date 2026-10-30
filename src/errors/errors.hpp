@@ -6,10 +6,18 @@
 #include <string>
 #include <system_error>
 #include <tuple>
+#include <type_traits>
 #include <vector>
 
 namespace amj::errors {
 
+enum class ErrorCode : std::uint8_t {
+    GenericError = 1,
+};
+
+[[nodiscard]] std::error_code make_error_code(ErrorCode errorCode);
+
+// A zero errorCode represents success; every failure must have a nonzero code.
 // All modules share this type. Module-specific enums use their own error
 // categories; detail may hold any copyable module-specific error struct.
 // Treat published errors and their cause chains as immutable and acyclic.
@@ -38,3 +46,10 @@ struct Error {
 [[nodiscard]] Error withStackTrace(Error error);
 
 } // namespace amj::errors
+
+namespace std {
+
+template <>
+struct is_error_code_enum<amj::errors::ErrorCode> : true_type {};
+
+} // namespace std

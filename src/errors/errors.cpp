@@ -9,6 +9,30 @@
 #include <tuple>
 
 namespace amj::errors {
+namespace {
+
+class ErrorCategory final : public std::error_category {
+  public:
+    const char* name() const noexcept override {
+        return "amj.errors";
+    }
+
+    std::string message(int value) const override {
+        switch (value) {
+            case static_cast<int>(ErrorCode::GenericError):
+                return "Operation failed";
+            default:
+                return "Unknown error";
+        }
+    }
+};
+
+} // namespace
+
+std::error_code make_error_code(ErrorCode errorCode) {
+    static const ErrorCategory category;
+    return std::error_code(static_cast<int>(errorCode), category);
+}
 
 bool Error::is(std::error_code targetErrorCode) const {
     return as(targetErrorCode) != nullptr;

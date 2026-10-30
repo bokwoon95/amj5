@@ -70,7 +70,7 @@ errors::Error makeError(GError* error) {
 
 } // namespace
 
-std::expected<void, errors::Error> save(const std::string& service, const std::string& user, const std::string& value) {
+errors::Error save(const std::string& service, const std::string& user, const std::string& value) {
     const SecretSchema schema = makeSchema();
     std::string label = service;
     if (!user.empty()) {
@@ -79,13 +79,13 @@ std::expected<void, errors::Error> save(const std::string& service, const std::s
     GError* error = nullptr;
     const gboolean stored = secret_password_store_sync(&schema, SECRET_COLLECTION_DEFAULT, label.c_str(), value.c_str(), nullptr, &error, "service", service.c_str(), "username", user.c_str(), nullptr);
     if (error != nullptr) {
-        return std::unexpected(makeError(error));
+        return makeError(error);
     }
     if (stored == 0) {
-        return std::unexpected(errors::Error{
+        return errors::Error{
             .errorCode = ErrorCode::GenericError,
             .errorMessage = "Failed to store secret.",
-        });
+        };
     }
     return {};
 }
@@ -101,12 +101,12 @@ std::expected<std::string, errors::Error> load(const std::string& service, const
     return std::string(rawSecret);
 }
 
-std::expected<void, errors::Error> remove(const std::string& service, const std::string& user) {
+errors::Error remove(const std::string& service, const std::string& user) {
     const SecretSchema schema = makeSchema();
     GError* error = nullptr;
     const gboolean deleted = secret_password_clear_sync(&schema, nullptr, &error, "service", service.c_str(), "username", user.c_str(), nullptr);
     if (error != nullptr || deleted == 0) {
-        return std::unexpected(makeError(error));
+        return makeError(error);
     }
     return {};
 }
