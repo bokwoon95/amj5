@@ -14,7 +14,7 @@
 - Always run ./scripts/lint.ps1 -changed -quiet when source files were added or changed.
 - Use ./scripts/build.ps1 -quiet to build the project quietly and not pollute the context window.
 - Write C++ like Go: prefer straightforward conditionals and loops, useful zero values, and structs/classes.
-- I _need_ to write C++ that is NOT intimidating for a Go/Java programmer to read!! If code can be expressed CORRECTLY in simpler but less efficient constructs that are also present in Go/Java OR more efficient but completely alien constructs that only exist in C++, pick the simple Go/Java constructs everytime!! We are writing a networked desktop app, NOT a high performance number cruncher!!
+- Write C++ that is NOT intimidating for a Go/Java programmer to read!! If code can be expressed CORRECTLY in slower but familiar Go/Java constructs OR faster but completely alien C++ constructs, pick the simple Go/Java constructs everytime!! We are writing a networked desktop app, NOT a high performance number cruncher!! Correctness, readability, performance, in that order!!
     - Do not use member initializer list, AT ALL. Always set each this->field manually like it was a dumb Java program.
     - Avoid using std::move() as a microoptimization if stupidly copying is not catastrophically slow. It's not about being imposing a small syntactic overhead, it's about imposing a _huge_ understanding overhead as a Go programmer would have to ask why std::move is even needed (when omitting it would be JUST as correct just with a little more allocations).
 - Use std types where possible.
