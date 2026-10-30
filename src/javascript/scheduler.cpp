@@ -143,10 +143,10 @@ std::expected<int64_t, errors::Error> Scheduler::registerCleanup(std::function<e
         return std::unexpected(errors::generic("called registerCleanup() inside a clear()"));
     }
     if (cleanup == nullptr) {
-        return std::unexpected(errors::generic("Cannot register an empty cleanup"));
+        return std::unexpected(errors::generic("registered a nullptr cleanup function"));
     }
-    if (cleanups.size() >= 4096 || lastCleanupID >= std::numeric_limits<int64_t>::max()) {
-        return std::unexpected(errors::generic("Pending cleanup limit or cleanup IDs exhausted"));
+    if (lastCleanupID >= std::numeric_limits<int64_t>::max()) {
+        return std::unexpected(errors::generic("cleanup IDs exhausted"));
     }
     const int64_t cleanupID = lastCleanupID + 1;
     cleanups.emplace(cleanupID, std::move(cleanup));
