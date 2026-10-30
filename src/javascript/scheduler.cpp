@@ -146,7 +146,7 @@ std::expected<int64_t, errors::Error> Scheduler::registerCleanup(std::function<e
         return std::unexpected(errors::generic("registered a nullptr cleanup function"));
     }
     if (lastCleanupID >= std::numeric_limits<int64_t>::max()) {
-        return std::unexpected(errors::generic("cleanup IDs exhausted"));
+        return std::unexpected(errors::generic("cleanupIDs exhausted"));
     }
     const int64_t cleanupID = lastCleanupID + 1;
     cleanups.emplace(cleanupID, std::move(cleanup));
