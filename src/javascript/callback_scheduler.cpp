@@ -19,36 +19,18 @@
 namespace amj::javascript {
 namespace chrono = std::chrono;
 
-struct Readiness::Wakeup {
-    std::mutex mutex = {};
-    std::condition_variable condition = {};
-};
-
 struct CallbackScheduler::Impl {
     JSContext* jsContext = nullptr;
     std::thread::id ownerThread = {};
-    std::shared_ptr<Readiness::Wakeup> wakeup = std::make_shared<Readiness::Wakeup>();
-    std::map<int64_t, CallbackRecord> entries = {};
-    int64_t lastCallbackID = 0;
+    std::mutex mutex = {};
+    std::condition_variable conditionVariable = {};
+    // Both maps are protected by mutex. Callbacks and their captures must be
+    // executed/destroyed on the owner thread, outside the mutex.
+    std::map<int64_t, CallbackRecord> records = {};
+    std::map<int64_t, chrono::steady_clock::time_point> notifiedAt = {};
+    int64_t lastCallbackRecordID = 0;
     bool cancelling = false;
 };
-
-Readiness::Readiness(std::shared_ptr<Wakeup> wakeup) : wakeup(std::move(wakeup)), active(true) {
-    if (this->wakeup == nullptr) {
-        throw std::invalid_argument("Readiness requires scheduler wakeup state");
-    }
-}
-
-void Readiness::notify() {
-    {
-        const std::lock_guard<std::mutex> lock(wakeup->mutex);
-        if (!active || notifiedAt.has_value()) {
-            return;
-        }
-        notifiedAt = chrono::steady_clock::now();
-    }
-    wakeup->condition.notify_one();
-}
 
 CallbackScheduler::CallbackScheduler(JSContext* jsContext) : impl(std::make_unique<Impl>()) {
     if (jsContext == nullptr) {
@@ -67,42 +49,20 @@ CallbackScheduler::~CallbackScheduler() {
     }
 }
 
-std::shared_ptr<Readiness> CallbackScheduler::makeSignal() {
-    if (std::this_thread::get_id() != impl->ownerThread || impl->cancelling) {
-        throw std::logic_error("Invalid CallbackScheduler signal creation");
-    }
-    return std::make_shared<Readiness>(impl->wakeup);
-}
-
 int64_t CallbackScheduler::schedule(CallbackRecord callbackRecord) {
     if (std::this_thread::get_id() != impl->ownerThread || impl->cancelling) {
         throw std::logic_error("Invalid CallbackScheduler registration");
     }
-    if ((!callbackRecord.callback && !callbackRecord.cancel) ||
-        (!callbackRecord.callback && (callbackRecord.deadline.has_value() || callbackRecord.readySignal != nullptr)) ||
-        (callbackRecord.callback && !callbackRecord.deadline.has_value() && callbackRecord.readySignal == nullptr)) {
-        throw std::invalid_argument("Registration requires runnable work with a deadline/signal, or cancellation-only work");
+    if ((!callbackRecord.callback && !callbackRecord.cancel) || (!callbackRecord.callback && callbackRecord.deadline.has_value())) {
+        throw std::invalid_argument("Registration requires a callback or cancellation-only work without a deadline");
     }
-    if (impl->entries.size() >= 4096 || impl->lastCallbackID >= 9007199254740991) {
+    const std::lock_guard<std::mutex> lock(impl->mutex);
+    if (impl->records.size() >= 4096 || impl->lastCallbackRecordID >= 9007199254740991) {
         throw std::length_error("Pending callback limit or callback IDs exhausted");
     }
-    const std::shared_ptr<Readiness> readySignal = callbackRecord.readySignal;
-    if (readySignal != nullptr) {
-        if (readySignal->wakeup != impl->wakeup) {
-            throw std::invalid_argument("Readiness belongs to a different scheduler");
-        }
-        const std::lock_guard<std::mutex> lock(impl->wakeup->mutex);
-        if (readySignal->used) {
-            throw std::invalid_argument("Readiness cannot be reused");
-        }
-    }
-    const int64_t callbackRecordID = impl->lastCallbackID + 1;
-    impl->entries.emplace(callbackRecordID, std::move(callbackRecord));
-    impl->lastCallbackID = callbackRecordID;
-    if (readySignal != nullptr) {
-        const std::lock_guard<std::mutex> lock(impl->wakeup->mutex);
-        readySignal->used = true;
-    }
+    const int64_t callbackRecordID = impl->lastCallbackRecordID + 1;
+    impl->records.emplace(callbackRecordID, std::move(callbackRecord));
+    impl->lastCallbackRecordID = callbackRecordID;
     return callbackRecordID;
 }
 
@@ -110,17 +70,30 @@ void CallbackScheduler::unschedule(int64_t callbackRecordID) {
     if (std::this_thread::get_id() != impl->ownerThread) {
         throw std::logic_error("CallbackScheduler accessed from a non-owning thread");
     }
-    const std::map<int64_t, CallbackRecord>::iterator entry = impl->entries.find(callbackRecordID);
-    if (entry == impl->entries.end()) {
-        return;
+    std::map<int64_t, CallbackRecord>::node_type removed;
+    {
+        const std::lock_guard<std::mutex> lock(impl->mutex);
+        removed = impl->records.extract(callbackRecordID);
+        impl->notifiedAt.erase(callbackRecordID);
     }
-    if (entry->second.readySignal != nullptr) {
-        const std::lock_guard<std::mutex> lock(impl->wakeup->mutex);
-        entry->second.readySignal->active = false;
+    // Release callback captures outside the mutex, including for reentrant JS
+    // finalizers. An empty node makes unknown IDs a no-op.
+}
+
+void CallbackScheduler::notify(int64_t callbackRecordID) {
+    {
+        const std::lock_guard<std::mutex> lock(impl->mutex);
+        const std::map<int64_t, CallbackRecord>::const_iterator record = impl->records.find(callbackRecordID);
+        if (record == impl->records.end() || !record->second.callback) {
+            return;
+        }
+        // Repeated notifications coalesce and preserve the first timestamp.
+        const bool inserted = impl->notifiedAt.try_emplace(callbackRecordID, chrono::steady_clock::now()).second;
+        if (!inserted) {
+            return;
+        }
     }
-    // Destroy retained JS values outside the native mutex, on the owner thread.
-    const CallbackRecord removed = std::move(entry->second);
-    impl->entries.erase(entry);
+    impl->conditionVariable.notify_one();
 }
 
 void CallbackScheduler::dispatch() {
@@ -133,41 +106,41 @@ void CallbackScheduler::dispatch() {
     }
     const chrono::steady_clock::time_point now = chrono::steady_clock::now();
     std::vector<std::pair<chrono::steady_clock::time_point, int64_t>> ready;
-    ready.reserve(impl->entries.size());
     {
-        const std::lock_guard<std::mutex> lock(impl->wakeup->mutex);
-        for (const std::pair<const int64_t, CallbackRecord>& entry : impl->entries) {
-            if (!entry.second.callback) {
+        const std::lock_guard<std::mutex> lock(impl->mutex);
+        ready.reserve(impl->records.size());
+        for (const std::pair<const int64_t, CallbackRecord>& record : impl->records) {
+            if (!record.second.callback) {
                 continue;
             }
-            std::optional<chrono::steady_clock::time_point> readyAt;
-            if (entry.second.readySignal != nullptr) {
-                readyAt = entry.second.readySignal->notifiedAt;
+            std::optional<chrono::steady_clock::time_point> readyAtOption;
+            const std::map<int64_t, chrono::steady_clock::time_point>::const_iterator notification = impl->notifiedAt.find(record.first);
+            if (notification != impl->notifiedAt.end()) {
+                readyAtOption = notification->second;
             }
-            if (entry.second.deadline.has_value() && entry.second.deadline.value() <= now &&
-                (!readyAt.has_value() || entry.second.deadline.value() < readyAt.value())) {
-                readyAt = entry.second.deadline;
+            if (record.second.deadline.has_value() && record.second.deadline.value() <= now &&
+                (!readyAtOption.has_value() || record.second.deadline.value() < readyAtOption.value())) {
+                readyAtOption = record.second.deadline;
             }
-            if (readyAt.has_value()) {
-                ready.emplace_back(readyAt.value(), entry.first);
+            if (readyAtOption.has_value()) {
+                ready.emplace_back(readyAtOption.value(), record.first);
             }
         }
     }
     std::ranges::sort(ready);
-    for (const std::pair<chrono::steady_clock::time_point, int64_t>& readyEntry : ready) {
-        const std::map<int64_t, CallbackRecord>::iterator entry = impl->entries.find(readyEntry.second);
-        if (entry == impl->entries.end()) {
+    for (const std::pair<chrono::steady_clock::time_point, int64_t>& readyRecord : ready) {
+        std::map<int64_t, CallbackRecord>::node_type pending;
+        {
+            const std::lock_guard<std::mutex> lock(impl->mutex);
+            pending = impl->records.extract(readyRecord.second);
+            impl->notifiedAt.erase(readyRecord.second);
+        }
+        if (pending.empty()) {
             continue; // Earlier callbacks may remove other registrations.
         }
-        const CallbackRecord pending = std::move(entry->second);
-        if (pending.readySignal != nullptr) {
-            const std::lock_guard<std::mutex> lock(impl->wakeup->mutex);
-            pending.readySignal->active = false;
-        }
-        impl->entries.erase(entry);
-        pending.callback();
+        pending.mapped().callback();
         if (static_cast<int>(JS_HasException(impl->jsContext)) != 0) {
-            throw std::runtime_error("callback record left an unhandled JS exception");
+            throw std::runtime_error("Callback record left an unhandled JS exception");
         }
         if (static_cast<int>(JS_IsJobPending(JS_GetRuntime(impl->jsContext))) != 0) {
             return;
@@ -179,39 +152,41 @@ void CallbackScheduler::wait() {
     if (std::this_thread::get_id() != impl->ownerThread || impl->cancelling) {
         throw std::logic_error("Invalid CallbackScheduler wait");
     }
+    // Only the owner thread can enqueue JS jobs; workers only call notify().
     if (static_cast<int>(JS_IsJobPending(JS_GetRuntime(impl->jsContext))) != 0) {
         return;
     }
-    std::unique_lock<std::mutex> lock(impl->wakeup->mutex);
+    std::unique_lock<std::mutex> lock(impl->mutex);
     while (true) {
         const chrono::steady_clock::time_point now = chrono::steady_clock::now();
-        std::optional<chrono::steady_clock::time_point> nearest;
+        std::optional<chrono::steady_clock::time_point> nearestDeadlineOption;
         bool canProgress = false;
-        for (const std::pair<const int64_t, CallbackRecord>& entry : impl->entries) {
-            if (!entry.second.callback) {
+        for (const std::pair<const int64_t, CallbackRecord>& record : impl->records) {
+            if (!record.second.callback) {
                 continue;
             }
             canProgress = true;
-            if (entry.second.readySignal != nullptr && entry.second.readySignal->notifiedAt.has_value()) {
+            if (impl->notifiedAt.contains(record.first)) {
                 return;
             }
-            if (entry.second.deadline.has_value()) {
-                if (entry.second.deadline.value() <= now) {
+            if (record.second.deadline.has_value()) {
+                if (record.second.deadline.value() <= now) {
                     return;
                 }
-                if (!nearest.has_value() || entry.second.deadline.value() < nearest.value()) {
-                    nearest = entry.second.deadline;
+                if (!nearestDeadlineOption.has_value() || record.second.deadline.value() < nearestDeadlineOption.value()) {
+                    nearestDeadlineOption = record.second.deadline;
                 }
             }
         }
         if (!canProgress) {
             throw std::logic_error("No pending callback can make progress; invocation is stalled");
         }
-        // Checking readiness and entering the wait share the notification mutex.
-        if (nearest.has_value()) {
-            impl->wakeup->condition.wait_until(lock, nearest.value());
+        // Atomically release the predicate mutex and sleep, then reacquire it.
+        // Recheck manually after notifications, deadlines, and spurious wakeups.
+        if (nearestDeadlineOption.has_value()) {
+            impl->conditionVariable.wait_until(lock, nearestDeadlineOption.value());
         } else {
-            impl->wakeup->condition.wait(lock);
+            impl->conditionVariable.wait(lock);
         }
     }
 }
@@ -225,23 +200,21 @@ void CallbackScheduler::cancelAll() {
     }
     impl->cancelling = true;
     std::map<int64_t, CallbackRecord> pending;
-    pending.swap(impl->entries);
     {
-        const std::lock_guard<std::mutex> lock(impl->wakeup->mutex);
-        for (const std::pair<const int64_t, CallbackRecord>& entry : pending) {
-            if (entry.second.readySignal != nullptr) {
-                entry.second.readySignal->active = false;
-            }
-        }
+        const std::lock_guard<std::mutex> lock(impl->mutex);
+        pending.swap(impl->records);
+        impl->notifiedAt.clear();
     }
+    // Late worker notifications now find no record. Do not hold the mutex while
+    // stopping/joining workers, since those workers may be inside notify().
     std::exception_ptr failure;
-    std::optional<JSValue> firstJSException;
-    for (const std::pair<const int64_t, CallbackRecord>& entry : pending) {
-        if (!entry.second.cancel) {
+    std::optional<JSValue> firstJSExceptionOption;
+    for (const std::pair<const int64_t, CallbackRecord>& record : pending) {
+        if (!record.second.cancel) {
             continue;
         }
         try {
-            entry.second.cancel();
+            record.second.cancel();
             if (static_cast<int>(JS_HasException(impl->jsContext)) != 0) {
                 throw std::runtime_error("Cancellation hook left an unhandled JS exception");
             }
@@ -254,7 +227,7 @@ void CallbackScheduler::cancelAll() {
             if (static_cast<int>(JS_HasException(impl->jsContext)) != 0) {
                 const JSValue exception = JS_GetException(impl->jsContext);
                 if (firstFailure) {
-                    firstJSException = exception;
+                    firstJSExceptionOption = exception;
                 } else {
                     JS_FreeValue(impl->jsContext, exception);
                 }
@@ -264,8 +237,8 @@ void CallbackScheduler::cancelAll() {
     pending.clear();
     impl->cancelling = false;
     if (failure != nullptr) {
-        if (firstJSException.has_value()) {
-            JS_Throw(impl->jsContext, firstJSException.value());
+        if (firstJSExceptionOption.has_value()) {
+            JS_Throw(impl->jsContext, firstJSExceptionOption.value());
         }
         std::rethrow_exception(failure);
     }

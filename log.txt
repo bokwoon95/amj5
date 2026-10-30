@@ -1,3 +1,6 @@
 TODO: make context::Context compose well with other context::Context types, just like in Go.
 
 TODO: revamp callback_scheduler to use a mutex, a bool and a condition_variable instead of some Readiness struct.
+
+while (true) {
+}
