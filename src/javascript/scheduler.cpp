@@ -73,7 +73,7 @@ Scheduler::~Scheduler() {
 
 std::expected<int64_t, errors::Error> Scheduler::registerCallback(
     std::function<errors::Error()> callback,
-    std::optional<chrono::steady_clock::time_point> callAtOption
+    std::optional<chrono::steady_clock::time_point> triggerTimeOption
 ) {
     if (this_thread::get_id() != ownerThreadID) {
         return std::unexpected(errors::message("called registerCallback() outside owner thread"));
@@ -81,24 +81,21 @@ std::expected<int64_t, errors::Error> Scheduler::registerCallback(
     if (clearing) {
         return std::unexpected(errors::message("called registerCallback() inside a clear()"));
     }
-    if (!callback) {
-        return std::unexpected(errors::Error{
-            .errorCode = std::make_error_code(std::errc::invalid_argument),
-            .errorMessage = "Cannot register an empty callback",
-        });
+    if (callback == nullptr) {
+        return std::unexpected(errors::message("registered a nullptr callback function"));
     }
     const std::lock_guard<std::mutex> lock(mutex);
-    if (callbacks.size() >= 4096 || lastCallbackID >= 9007199254740991) {
-        return std::unexpected(errors::message("Pending callback limit or callback IDs exhausted"));
+    if (lastCallbackID >= std::numeric_limits<int64_t>::max()) {
+        return std::unexpected(errors::message("callbackIDs exhausted"));
     }
     const int64_t callbackID = lastCallbackID + 1;
-    if (callAtOption.has_value()) {
-        callAt.emplace(callbackID, callAtOption.value());
+    if (triggerTimeOption.has_value()) {
+        triggerTimes.emplace(callbackID, triggerTimeOption.value());
     }
     try {
         callbacks.emplace(callbackID, std::move(callback));
     } catch (...) {
-        callAt.erase(callbackID);
+        triggerTimes.erase(callbackID);
         throw;
     }
     lastCallbackID = callbackID;
@@ -113,8 +110,8 @@ errors::Error Scheduler::unregisterCallback(int64_t callbackID) {
     {
         const std::lock_guard<std::mutex> lock(mutex);
         removed = callbacks.extract(callbackID);
-        callAt.erase(callbackID);
-        markedReadyAt.erase(callbackID);
+        triggerTimes.erase(callbackID);
+        readyTimes.erase(callbackID);
     }
     // Destroy callback captures outside the mutex, on the owner thread.
     return {};
@@ -126,7 +123,7 @@ errors::Error Scheduler::markReady(int64_t callbackID) {
         if (!callbacks.contains(callbackID)) {
             return {};
         }
-        const bool inserted = markedReadyAt.try_emplace(callbackID, chrono::steady_clock::now()).second;
+        const bool inserted = readyTimes.try_emplace(callbackID, chrono::steady_clock::now()).second;
         if (!inserted) {
             return {};
         }
@@ -156,7 +153,7 @@ std::expected<int64_t, errors::Error> Scheduler::registerCleanup(std::function<e
 
 errors::Error Scheduler::cleanup(int64_t cleanupID) {
     if (this_thread::get_id() != ownerThreadID) {
-        return errors::message("Cleanup execution requires the owner thread");
+        return errors::message("called cleanup() outside owner thread");
     }
     const std::map<int64_t, std::function<errors::Error()>>::node_type pending = cleanups.extract(cleanupID);
     if (pending.empty()) {
@@ -183,8 +180,11 @@ errors::Error Scheduler::cleanup(int64_t cleanupID) {
 }
 
 errors::Error Scheduler::dispatch() {
-    if (this_thread::get_id() != ownerThreadID || clearing) {
-        return errors::message("Dispatch requires the owner thread outside clear()");
+    if (this_thread::get_id() != ownerThreadID) {
+        return errors::message("called dispatch() outside owner thread");
+    }
+    if (clearing) {
+        return errors::message("called dispatch() inside a clear()");
     }
     if (static_cast<int>(JS_HasException(jsContext)) != 0) {
         return errors::Error{
@@ -203,12 +203,12 @@ errors::Error Scheduler::dispatch() {
         ready.reserve(callbacks.size());
         for (const std::pair<const int64_t, std::function<errors::Error()>>& callback : callbacks) {
             std::optional<chrono::steady_clock::time_point> readyAtOption;
-            const std::map<int64_t, chrono::steady_clock::time_point>::const_iterator readiness = markedReadyAt.find(callback.first);
-            if (readiness != markedReadyAt.end()) {
+            const std::map<int64_t, chrono::steady_clock::time_point>::const_iterator readiness = readyTimes.find(callback.first);
+            if (readiness != readyTimes.end()) {
                 readyAtOption = readiness->second;
             }
-            const std::map<int64_t, chrono::steady_clock::time_point>::const_iterator deadline = callAt.find(callback.first);
-            if (deadline != callAt.end() && deadline->second <= now && (!readyAtOption.has_value() || deadline->second < readyAtOption.value())) {
+            const std::map<int64_t, chrono::steady_clock::time_point>::const_iterator deadline = triggerTimes.find(callback.first);
+            if (deadline != triggerTimes.end() && deadline->second <= now && (!readyAtOption.has_value() || deadline->second < readyAtOption.value())) {
                 readyAtOption = deadline->second;
             }
             if (readyAtOption.has_value()) {
@@ -222,8 +222,8 @@ errors::Error Scheduler::dispatch() {
         {
             const std::lock_guard<std::mutex> lock(mutex);
             pending = callbacks.extract(readyCallback.second);
-            callAt.erase(readyCallback.second);
-            markedReadyAt.erase(readyCallback.second);
+            triggerTimes.erase(readyCallback.second);
+            readyTimes.erase(readyCallback.second);
         }
         if (pending.empty()) {
             continue; // Earlier callbacks may unregister other callbacks.
@@ -277,12 +277,12 @@ errors::Error Scheduler::wait() {
                 .errorMessage = "No scheduled callback can make progress; invocation is stalled",
             };
         }
-        if (!markedReadyAt.empty()) {
+        if (!readyTimes.empty()) {
             return {};
         }
         const chrono::steady_clock::time_point now = chrono::steady_clock::now();
         std::optional<chrono::steady_clock::time_point> nearestDeadlineOption;
-        for (const std::pair<const int64_t, chrono::steady_clock::time_point>& deadline : callAt) {
+        for (const std::pair<const int64_t, chrono::steady_clock::time_point>& deadline : triggerTimes) {
             if (deadline.second <= now) {
                 return {};
             }
@@ -314,8 +314,8 @@ errors::Error Scheduler::clear() {
         const std::lock_guard<std::mutex> lock(mutex);
         pendingCallbacks.swap(callbacks);
         pendingCleanups.swap(cleanups);
-        callAt.clear();
-        markedReadyAt.clear();
+        triggerTimes.clear();
+        readyTimes.clear();
     }
     errors::Error firstError;
     std::optional<JSValue> firstJSExceptionOption;

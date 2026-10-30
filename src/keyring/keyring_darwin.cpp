@@ -102,7 +102,7 @@ std::expected<CFMutableDictionaryRef, errors::Error> createQuery(const std::stri
         if (query != nullptr) {
             CFRelease(query);
         }
-        return std::unexpected(errors::message("Failed to create credential query"));
+        return std::unexpected(errors::formta("Failed to create credential query"));
     }
     CFDictionaryAddValue(query, kSecClass, kSecClassGenericPassword);
     CFDictionaryAddValue(query, kSecAttrAccount, cfUser.value);
@@ -119,12 +119,12 @@ errors::Error save(const std::string& service, const std::string& user, const st
     }
     const ScopedCFRef<CFMutableDictionaryRef> query(queryResult.value());
     if (value.size() > static_cast<std::size_t>(std::numeric_limits<CFIndex>::max())) {
-        return errors::message("Secret too long");
+        return errors::formta("Secret too long");
     }
     const std::vector<UInt8> secret(value.begin(), value.end());
     const ScopedCFRef<CFDataRef> data(CFDataCreate(kCFAllocatorDefault, secret.data(), static_cast<CFIndex>(secret.size())));
     if (data.value == nullptr) {
-        return errors::message("Failed to create secret data");
+        return errors::formta("Failed to create secret data");
     }
     CFDictionaryAddValue(query.value, kSecValueData, data.value);
     OSStatus status = SecItemAdd(query.value, nullptr);
@@ -132,7 +132,7 @@ errors::Error save(const std::string& service, const std::string& user, const st
         CFDictionaryRemoveValue(query.value, kSecValueData);
         const ScopedCFRef<CFMutableDictionaryRef> attributes(CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
         if (attributes.value == nullptr) {
-            return errors::message("Failed to create secret attributes");
+            return errors::formta("Failed to create secret attributes");
         }
         CFDictionaryAddValue(attributes.value, kSecValueData, data.value);
         status = SecItemUpdate(query.value, attributes.value);
@@ -157,7 +157,7 @@ std::expected<std::string, errors::Error> load(const std::string& service, const
         return std::unexpected(makeError(status));
     }
     if (result == nullptr || CFGetTypeID(result) != CFDataGetTypeID()) {
-        return std::unexpected(errors::message("Invalid secret data type"));
+        return std::unexpected(errors::formta("Invalid secret data type"));
     }
     const CFDataRef data = static_cast<CFDataRef>(result);
     const CFIndex length = CFDataGetLength(data);
@@ -166,7 +166,7 @@ std::expected<std::string, errors::Error> load(const std::string& service, const
     }
     const UInt8* bytes = CFDataGetBytePtr(data);
     if (length < 0 || bytes == nullptr) {
-        return std::unexpected(errors::message("Invalid secret data buffer"));
+        return std::unexpected(errors::formta("Invalid secret data buffer"));
     }
     const std::span<const UInt8> plaintext(bytes, static_cast<std::size_t>(length));
     return std::string(plaintext.begin(), plaintext.end());

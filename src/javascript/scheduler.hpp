@@ -48,7 +48,7 @@ class Scheduler {
 
     // nullopt means readiness is explicit. An elapsed callAt or markReady() makes the
     // callback runnable. IDs are never reused, including across clear().
-    [[nodiscard]] std::expected<int64_t, errors::Error> registerCallback(std::function<errors::Error()> callback, std::optional<chrono::steady_clock::time_point> callAtOption);
+    [[nodiscard]] std::expected<int64_t, errors::Error> registerCallback(std::function<errors::Error()> callback, std::optional<chrono::steady_clock::time_point> triggerTimeOption);
 
     // Removes the callback and its readiness timestamp/deadline; invokes no cleanup.
     // Unknown IDs are ignored.
@@ -85,8 +85,8 @@ class Scheduler {
     std::condition_variable conditionVariable = {};
     // The mutex protects callback/deadline/readiness maps shared with markReady().
     std::map<int64_t, std::function<errors::Error()>> callbacks = {};
-    std::map<int64_t, chrono::steady_clock::time_point> callAt = {};
-    std::map<int64_t, chrono::steady_clock::time_point> markedReadyAt = {};
+    std::map<int64_t, chrono::steady_clock::time_point> triggerTimes = {};
+    std::map<int64_t, chrono::steady_clock::time_point> readyTimes = {};
     std::map<int64_t, std::function<errors::Error()>> cleanups = {};
     int64_t lastCallbackID = 0;
     int64_t lastCleanupID = 0;
