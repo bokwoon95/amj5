@@ -92,7 +92,7 @@ Error withStackTrace(Error error) {
         if (error.stacktrace.size() >= 30) {
             break;
         }
-        error.stacktrace.push_back(std::tuple<std::string, std::uint_least32_t, std::string>(frame.filename, frame.line.value_or(0), frame.symbol));
+        error.stacktrace.push_back({frame.filename, frame.line.value_or(0), frame.symbol});
     }
     return error;
 }
