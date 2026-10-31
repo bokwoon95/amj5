@@ -17,16 +17,19 @@
 - Write C++ that is NOT intimidating for a Go/Java programmer to read!! If code can be expressed CORRECTLY in slower but familiar Go/Java constructs OR faster but completely alien C++ constructs, pick the simple Go/Java constructs everytime!! We are writing a networked desktop app, NOT a high performance number cruncher!! Correctness, readability, performance, in that order!!
     - Do not use member initializer lists, AT ALL. Always set each this->field manually like it was a dumb Java program.
     - Avoid using std::move() as a microoptimization if stupidly copying is not catastrophically slow. It's not about being imposing a small syntactic overhead, it's about imposing a _huge_ understanding overhead as a Go programmer would have to ask why std::move is even needed (when omitting it would be JUST as correct just with a little more allocations).
+     - Do NOT use emplace variants unless required for correctness. Prefer explicit values with push_back, insert, or insert_or_assign, preserving overwrite semantics.
 - Use std types where possible.
 - Prefer adding minimal structs and fields.
 - DO NOT define macros. There is always a non-macro way to do something, or else just bite the bullet and repeat the code.
 - DO NOT use auto when the type can be explicitly named EXCEPT for lambdas, so we don't have to step through a std::function wrapper during debugging.
 - DO NOT use *T t = new T, use *T t = new T().
 - DO NOT use uniform initialization syntax i.e. int64_t num{0}.
-    1. Prefer assigning literals directly std::vector<int> v = {1, 2, 3}. This applies to default member initializers also.
-    2. If calling a default constructor, just omit the parens entirely i.e. T t not T t{}.
-    3. Use traditional constructor syntax for parameterized constructors i.e. T t(a, b).
-    4. If a constructor argument is a constructor call, wrap it in parentheses e.g. (A()) to disambiguate it from the Most Vexing Parse.
+- Do NOT use direct-list initialization for named variables (T t{value}).
+    1. Use T t = value; for literals and existing values.
+    2. Use T t = T(); for default construction.
+    3. Use T t = T(a, b); for parameterized construction. This avoids the Most Vexing Parse.
+    4. Braced initializers are encouraged for containers, pairs, tuples, and structs: T t = {...}; or push_back({...}).
+    5. Every struct data member must have an explicit default member initializer.
 - Every struct data member MUST have an explicit default member initializer, even when omitting it would produce identical behavior. Use = {}; for containers, = ""; for strings, = nullptr; for pointers, and the appropriate zero value for scalars. Never omit an initializer merely because the type default-constructs itself. Before completing a struct change, check every field for compliance.
     - Default member initializers should default to the type's zero value, like Go. It is up to the callers to set the fields to any other meaningful value besides the zero value.
 - Prefer struct designated initializers (aka struct literals) over struct constructors.

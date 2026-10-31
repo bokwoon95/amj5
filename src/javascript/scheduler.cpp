@@ -205,7 +205,7 @@ errors::Error Scheduler::dispatch() {
                 }
             }
             if (optionalReadyAt.has_value()) {
-                ready.emplace_back(optionalReadyAt.value(), callback.first);
+                ready.push_back(std::pair<chrono::steady_clock::time_point, int64_t>(optionalReadyAt.value(), callback.first));
             }
         }
     }
