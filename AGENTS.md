@@ -15,7 +15,7 @@
 - Use ./scripts/build.ps1 -quiet to build the project quietly and not pollute the context window.
 - Write C++ like Go: prefer straightforward conditionals and loops, useful zero values, and structs/classes.
 - Write C++ that is NOT intimidating for a Go/Java programmer to read!! If code can be expressed CORRECTLY in slower but familiar Go/Java constructs OR faster but completely alien C++ constructs, pick the simple Go/Java constructs everytime!!
-    - We are writing a networked desktop app, NOT a high performance number cruncher!! Correctness, readability, performance, in that order!! We are not competing against other C++ code, our comptetitors are programs written in Python or JavaScript so simply being written in C++ is already a huge performance boost!!
+    - We are writing a networked desktop app, NOT a high performance number cruncher!! Correctness, readability, performance, in that order!! We are not competing against other C++ code, our comptetitors are programs written in Python or JavaScript so simply being written in C++ is already a huge performance win!!
     - Do not use member initializer lists, AT ALL. Always set each this->field manually like it was a dumb Java program.
     - Avoid using std::move() as a microoptimization if stupidly copying is not catastrophically slow. It's not about being imposing a small syntactic overhead, it's about imposing a _huge_ understanding overhead as a Go programmer would have to ask why std::move is even needed (when omitting it would be JUST as correct just with a little more allocations).
     - Do NOT use emplace variants unless required for correctness. Prefer explicit values with push_back, insert, or insert_or_assign, preserving overwrite semantics.
