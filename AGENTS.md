@@ -40,7 +40,6 @@
         }
 - DO NOT use underscore suffixes or m_ prefixes to denote member fields. Just use normal names. If a private field and a public getter method would clash, just use xxx and getXXX().
 - DO NOT use default arguments. Be pedantic that callers should supply ALL arguments. Just like in Go.
-- DO NOT use implicit bool <-> int conversions.
 - Use const BEFORE type i.e. west const.
 - Floating point literals MUST always specify both the integer part and fractional part i.e. 0.5.
 - Explicitly handle division by zero with an if check.

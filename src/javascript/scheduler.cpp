@@ -159,7 +159,7 @@ errors::Error Scheduler::cleanup(int64_t cleanupID) {
     } catch (...) {
         error = errors::message("Cleanup threw an unknown C++ exception");
     }
-    if (static_cast<int>(JS_HasException(jsContext)) != 0) {
+    if (JS_HasException(jsContext)) {
         error.errorCode = ErrorCode::JSException;
         if (error.errorMessage.empty()) {
             error.errorMessage = "Cleanup left a pending JavaScript exception";
@@ -178,14 +178,14 @@ errors::Error Scheduler::dispatch() {
     if (clearing) {
         return errors::message("called dispatch() inside a clear()");
     }
-    if (static_cast<int>(JS_HasException(jsContext)) != 0) {
+    if (JS_HasException(jsContext)) {
         return errors::Error{
             .errorCode = ErrorCode::JSException,
             .errorMessage = "Cannot dispatch with a pending JavaScript exception",
         };
     }
     // Promise continuations must get a chance to clear timers between callbacks.
-    if (static_cast<int>(JS_IsJobPending(JS_GetRuntime(jsContext))) != 0) {
+    if (JS_IsJobPending(JS_GetRuntime(jsContext))) {
         return {};
     }
     const chrono::steady_clock::time_point now = chrono::steady_clock::now();
@@ -232,7 +232,7 @@ errors::Error Scheduler::dispatch() {
         } catch (...) {
             error = errors::message("Callback threw an unknown C++ exception");
         }
-        if (static_cast<int>(JS_HasException(jsContext)) != 0) {
+        if (JS_HasException(jsContext)) {
             error.errorCode = ErrorCode::JSException;
             if (error.errorMessage.empty()) {
                 error.errorMessage = "Callback left a pending JavaScript exception";
@@ -244,7 +244,7 @@ errors::Error Scheduler::dispatch() {
         if (error.errorCode) {
             return error;
         }
-        if (static_cast<int>(JS_IsJobPending(JS_GetRuntime(jsContext))) != 0) {
+        if (JS_IsJobPending(JS_GetRuntime(jsContext))) {
             return {};
         }
     }
@@ -255,14 +255,14 @@ errors::Error Scheduler::wait() {
     if (this_thread::get_id() != ownerThreadID || clearing) {
         return errors::message("Wait requires the owner thread outside clear()");
     }
-    if (static_cast<int>(JS_HasException(jsContext)) != 0) {
+    if (JS_HasException(jsContext)) {
         return errors::Error{
             .errorCode = ErrorCode::JSException,
             .errorMessage = "Cannot wait with a pending JavaScript exception",
         };
     }
     // Only the owner thread can enqueue JS jobs; workers only call markReady().
-    if (static_cast<int>(JS_IsJobPending(JS_GetRuntime(jsContext))) != 0) {
+    if (JS_IsJobPending(JS_GetRuntime(jsContext))) {
         return {};
     }
     std::unique_lock<std::mutex> lock(mutex);
@@ -317,7 +317,7 @@ errors::Error Scheduler::clear() {
     std::optional<JSValue> optionalFirstJSException;
     // Preserve an exception already pending on entry while allowing cleanups to
     // call QuickJS with no exception pending.
-    if (static_cast<int>(JS_HasException(jsContext)) != 0) {
+    if (JS_HasException(jsContext)) {
         optionalFirstJSException = JS_GetException(jsContext);
         firstError = errors::Error{
             .errorCode = ErrorCode::JSException,
@@ -333,7 +333,7 @@ errors::Error Scheduler::clear() {
         } catch (...) {
             error = errors::message("Cleanup threw an unknown C++ exception");
         }
-        if (static_cast<int>(JS_HasException(jsContext)) != 0) {
+        if (JS_HasException(jsContext)) {
             const JSValue exception = JS_GetException(jsContext);
             error.errorCode = ErrorCode::JSException;
             if (error.errorMessage.empty()) {
