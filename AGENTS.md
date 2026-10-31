@@ -24,11 +24,11 @@
 - DO NOT use auto when the type can be explicitly named EXCEPT for lambdas, so we don't have to step through a std::function wrapper during debugging.
 - DO NOT use *T t = new T, use *T t = new T().
 - DO NOT use uniform initialization syntax i.e. int64_t num{0}.
-- Do NOT use direct-list initialization for named variables (T t{value}).
-    1. Use T t = value; for literals and existing values.
-    2. Use T t = T(); for default construction.
-    3. Use T t = T(a, b); for parameterized construction. This avoids the Most Vexing Parse.
-    4. Braced initializers are encouraged for containers, pairs, tuples, and structs: T t = {...}; or push_back({...}).
+- Do NOT use direct-list initialization for named variables (`T t{value}`).
+    1. Use `T t = value;` for literals and existing values.
+    2. For default construction, use `T t;` (not `T t{};`).
+    3. For parameterized construction, use `T t(a, b);`. If this triggers the Most Vexing Parse, wrap constructor-call arguments in extra parentheses: `T t((A()));`.
+    4. Braced initializers are encouraged for containers, pairs, tuples, and structs: `T t = {...};` or `push_back({...})`.
     5. Every struct data member must have an explicit default member initializer.
 - Every struct data member MUST have an explicit default member initializer, even when omitting it would produce identical behavior. Use = {}; for containers, = ""; for strings, = nullptr; for pointers, and the appropriate zero value for scalars. Never omit an initializer merely because the type default-constructs itself. Before completing a struct change, check every field for compliance.
     - Default member initializers should default to the type's zero value, like Go. It is up to the callers to set the fields to any other meaningful value besides the zero value.
