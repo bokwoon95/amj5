@@ -27,10 +27,11 @@ enum class ErrorCode : std::uint8_t {
 
 [[nodiscard]] std::error_code make_error_code(ErrorCode errorCode);
 
-// All methods except markReady() require the constructing thread. Callbacks,
-// cleanups, and destruction of their captures happen on that thread outside the
-// mutex. Workers need checked access (e.g. weak_ptr); the final owner must release
-// the scheduler on its constructing thread. The borrowed context must outlive it.
+// All methods except markReady() require the constructing thread. Callbacks and
+// cleanups execute outside the mutex. Their captures are destroyed on that thread,
+// possibly under the mutex: destructors must not reenter the scheduler or wait for
+// threads that use it. Workers must stop/join before the scheduler is destroyed;
+// registered cleanups may do this. The borrowed context must outlive the scheduler.
 //
 // Supplied functions return zero-code Error for success. Pending JS exceptions
 // after callbacks execute are reported as JSException. Error codes

@@ -57,6 +57,11 @@ find_package(cpptrace REQUIRED)
 # JavaScript engine.
 find_package(qjs REQUIRED)
 
+# Native Fetch URL parsing and HTTPS transport.
+find_package(ada CONFIG REQUIRED)
+find_package(httplib CONFIG REQUIRED)
+find_package(OpenSSL REQUIRED)
+
 # Select MSVC C/C++ runtime linkage; CMake generates the compiler flags.
 #
 # set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreadedDebugDLL) -> /MDd (dynamic debug
@@ -137,11 +142,22 @@ endif()
 
 ## == src/javascript == ##
 
+# File-by-file dependency order: URL -> text -> scheduler -> timeout -> fetch.
 add_library(amj_javascript STATIC
+    src/javascript/url.cpp
+    src/javascript/url.js
+    src/javascript/text.js
     src/javascript/scheduler.cpp
+    src/javascript/timeout.cpp
+    src/javascript/fetch.cpp
+    src/javascript/fetch.js
 )
 list(APPEND amj_libraries amj_javascript)
-target_link_libraries(amj_javascript PUBLIC amj_errors qjs PRIVATE Threads::Threads)
+target_link_libraries(amj_javascript PUBLIC amj_errors qjs PRIVATE Threads::Threads ada::ada httplib::httplib OpenSSL::SSL OpenSSL::Crypto)
+# Keep the JS modules alongside the build without evaluating them globally.
+configure_file(src/javascript/url.js javascript/url.js COPYONLY)
+configure_file(src/javascript/text.js javascript/text.js COPYONLY)
+configure_file(src/javascript/fetch.js javascript/fetch.js COPYONLY)
 
 ## == Tests == ##
 
