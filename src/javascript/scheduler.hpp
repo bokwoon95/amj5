@@ -84,10 +84,10 @@ class Scheduler {
     std::mutex mutex = {};
     std::condition_variable conditionVariable = {};
     // The mutex protects callback/deadline/readiness maps shared with markReady().
-    std::map<int64_t, std::function<errors::Error()>> callbacks = {};
-    std::map<int64_t, chrono::steady_clock::time_point> triggerTimes = {};
-    std::map<int64_t, chrono::steady_clock::time_point> readyTimes = {};
-    std::map<int64_t, std::function<errors::Error()>> cleanups = {};
+    std::map<int64_t, std::function<errors::Error()>> callbackMap = {};
+    std::map<int64_t, chrono::steady_clock::time_point> triggerTimeMap = {};
+    std::map<int64_t, chrono::steady_clock::time_point> readyTimeMap = {};
+    std::map<int64_t, std::function<errors::Error()>> cleanupMap = {};
     int64_t callbackIDCounter = 0;
     int64_t cleanupIDCounter = 0;
     bool clearing = false;

@@ -90,9 +90,9 @@ std::expected<int64_t, errors::Error> Scheduler::registerCallback(
     }
     callbackIDCounter++;
     const int64_t callbackID = callbackIDCounter;
-    callbacks.insert_or_assign(callbackID, callback);
+    callbackMap.insert_or_assign(callbackID, callback);
     if (optionalTriggerTime.has_value()) {
-        triggerTimes.insert_or_assign(callbackID, optionalTriggerTime.value());
+        triggerTimeMap.insert_or_assign(callbackID, optionalTriggerTime.value());
     }
     return callbackID;
 }
@@ -102,22 +102,22 @@ errors::Error Scheduler::unregisterCallback(int64_t callbackID) {
         return errors::message("called unregisterCallback() outside owner thread");
     }
     const std::lock_guard<std::mutex> lock(mutex);
-    callbacks.erase(callbackID);
-    triggerTimes.erase(callbackID);
-    readyTimes.erase(callbackID);
+    callbackMap.erase(callbackID);
+    triggerTimeMap.erase(callbackID);
+    readyTimeMap.erase(callbackID);
     return {};
 }
 
 errors::Error Scheduler::markReady(int64_t callbackID) {
     {
         const std::lock_guard<std::mutex> lock(mutex);
-        if (!callbacks.contains(callbackID)) {
+        if (!callbackMap.contains(callbackID)) {
             return {};
         }
-        if (readyTimes.contains(callbackID)) {
+        if (readyTimeMap.contains(callbackID)) {
             return {};
         }
-        readyTimes.insert_or_assign(callbackID, chrono::steady_clock::now());
+        readyTimeMap.insert_or_assign(callbackID, chrono::steady_clock::now());
     }
     conditionVariable.notify_one();
     return {};
@@ -138,7 +138,7 @@ std::expected<int64_t, errors::Error> Scheduler::registerCleanup(std::function<e
     }
     cleanupIDCounter++;
     const int64_t cleanupID = cleanupIDCounter;
-    cleanups.insert_or_assign(cleanupID, cleanup);
+    cleanupMap.insert_or_assign(cleanupID, cleanup);
     return cleanupID;
 }
 
@@ -146,11 +146,11 @@ errors::Error Scheduler::cleanup(int64_t cleanupID) {
     if (this_thread::get_id() != ownerThreadID) {
         return errors::message("called cleanup() outside owner thread");
     }
-    if (!cleanups.contains(cleanupID)) {
+    if (!cleanupMap.contains(cleanupID)) {
         return {};
     }
-    const std::function<errors::Error()> cleanup = cleanups.at(cleanupID);
-    cleanups.erase(cleanupID);
+    const std::function<errors::Error()> cleanup = cleanupMap.at(cleanupID);
+    cleanupMap.erase(cleanupID);
     errors::Error error;
     try {
         error = cleanup();
@@ -161,12 +161,6 @@ errors::Error Scheduler::cleanup(int64_t cleanupID) {
     }
     if (JS_HasException(jsContext)) {
         error.errorCode = ErrorCode::JSException;
-        if (error.errorMessage.empty()) {
-            error.errorMessage = "Cleanup left a pending JavaScript exception";
-        }
-    } else if (error.errorCode == ErrorCode::JSException) {
-        error.errorCode = errors::ErrorCode::GenericError;
-        error.errorMessage = "Cleanup returned JSException without a pending JavaScript exception";
     }
     return error;
 }
@@ -192,20 +186,20 @@ errors::Error Scheduler::dispatch() {
     std::vector<std::pair<chrono::steady_clock::time_point, int64_t>> ready;
     {
         const std::lock_guard<std::mutex> lock(mutex);
-        ready.reserve(callbacks.size());
-        for (const std::pair<const int64_t, std::function<errors::Error()>>& callback : callbacks) {
-            std::optional<chrono::steady_clock::time_point> optionalReadyAt;
-            if (readyTimes.contains(callback.first)) {
-                optionalReadyAt = readyTimes.at(callback.first);
+        ready.reserve(callbackMap.size());
+        for (const std::pair<const int64_t, std::function<errors::Error()>>& entry : callbackMap) {
+            std::optional<chrono::steady_clock::time_point> optionalTriggerTime;
+            if (readyTimeMap.contains(entry.first)) {
+                optionalTriggerTime = readyTimeMap.at(entry.first);
             }
-            if (triggerTimes.contains(callback.first)) {
-                const chrono::steady_clock::time_point deadline = triggerTimes.at(callback.first);
-                if (deadline <= now && (!optionalReadyAt.has_value() || deadline < optionalReadyAt.value())) {
-                    optionalReadyAt = deadline;
+            if (triggerTimeMap.contains(entry.first)) {
+                const chrono::steady_clock::time_point deadline = triggerTimeMap.at(entry.first);
+                if (deadline <= now && (!optionalTriggerTime.has_value() || deadline < optionalTriggerTime.value())) {
+                    optionalTriggerTime = deadline;
                 }
             }
-            if (optionalReadyAt.has_value()) {
-                ready.push_back({optionalReadyAt.value(), callback.first});
+            if (optionalTriggerTime.has_value()) {
+                ready.push_back({optionalTriggerTime.value(), entry.first});
             }
         }
     }
@@ -214,12 +208,12 @@ errors::Error Scheduler::dispatch() {
         std::function<errors::Error()> callback;
         {
             const std::lock_guard<std::mutex> lock(mutex);
-            if (callbacks.contains(readyCallback.second)) {
-                callback = callbacks.at(readyCallback.second);
-                callbacks.erase(readyCallback.second);
+            if (callbackMap.contains(readyCallback.second)) {
+                callback = callbackMap.at(readyCallback.second);
+                callbackMap.erase(readyCallback.second);
             }
-            triggerTimes.erase(readyCallback.second);
-            readyTimes.erase(readyCallback.second);
+            triggerTimeMap.erase(readyCallback.second);
+            readyTimeMap.erase(readyCallback.second);
         }
         if (callback == nullptr) {
             continue; // Earlier callbacks may unregister other callbacks.
@@ -267,18 +261,18 @@ errors::Error Scheduler::wait() {
     }
     std::unique_lock<std::mutex> lock(mutex);
     while (true) {
-        if (callbacks.empty()) {
+        if (callbackMap.empty()) {
             return errors::Error{
                 .errorCode = ErrorCode::Stalled,
                 .errorMessage = "No scheduled callback can make progress; invocation is stalled",
             };
         }
-        if (!readyTimes.empty()) {
+        if (!readyTimeMap.empty()) {
             return {};
         }
         const chrono::steady_clock::time_point now = chrono::steady_clock::now();
         std::optional<chrono::steady_clock::time_point> optionalNearestDeadline;
-        for (const std::pair<const int64_t, chrono::steady_clock::time_point>& deadline : triggerTimes) {
+        for (const std::pair<const int64_t, chrono::steady_clock::time_point>& deadline : triggerTimeMap) {
             if (deadline.second <= now) {
                 return {};
             }
@@ -308,10 +302,10 @@ errors::Error Scheduler::clear() {
     std::map<int64_t, std::function<errors::Error()>> pendingCleanups;
     {
         const std::lock_guard<std::mutex> lock(mutex);
-        pendingCallbacks.swap(callbacks);
-        pendingCleanups.swap(cleanups);
-        triggerTimes.clear();
-        readyTimes.clear();
+        pendingCallbacks.swap(callbackMap);
+        pendingCleanups.swap(cleanupMap);
+        triggerTimeMap.clear();
+        readyTimeMap.clear();
     }
     errors::Error firstError;
     std::optional<JSValue> optionalFirstJSException;
