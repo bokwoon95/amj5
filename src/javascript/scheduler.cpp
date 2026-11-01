@@ -69,7 +69,7 @@ Scheduler::~Scheduler() {
     }
 }
 
-std::expected<int64_t, errors::Error> Scheduler::registerCallback(std::function<errors::Error()> callback, std::optional<chrono::steady_clock::time_point> optionalTriggerTime) {
+std::expected<int64_t, errors::Error> Scheduler::registerCallback(std::function<errors::Error()> callback, std::optional<chrono::steady_clock::time_point> triggerTime) {
     if (this_thread::get_id() != ownerThreadID) {
         return std::unexpected(errors::message("called registerCallback() outside owner thread"));
     }
@@ -86,8 +86,8 @@ std::expected<int64_t, errors::Error> Scheduler::registerCallback(std::function<
     callbackIDCounter++;
     const int64_t callbackID = callbackIDCounter;
     callbackMap.insert_or_assign(callbackID, callback);
-    if (optionalTriggerTime.has_value()) {
-        triggerTimeMap.insert_or_assign(callbackID, optionalTriggerTime.value());
+    if (triggerTime.has_value()) {
+        triggerTimeMap.insert_or_assign(callbackID, triggerTime.value());
     }
     return callbackID;
 }
@@ -186,37 +186,37 @@ errors::Error Scheduler::runNext() {
                 };
             }
             const chrono::steady_clock::time_point now = chrono::steady_clock::now();
-            std::optional<chrono::steady_clock::time_point> optionalNearestDeadline;
-            std::optional<Record> optionalRecord;
+            std::optional<chrono::steady_clock::time_point> nearestDeadline;
+            std::optional<Record> record;
             for (const std::pair<const int64_t, std::function<errors::Error()>>& entry : callbackMap) {
                 const int64_t callbackID = entry.first;
                 const std::function<errors::Error()> callback = entry.second;
-                std::optional<chrono::steady_clock::time_point> optionalReadyTime;
+                std::optional<chrono::steady_clock::time_point> readyTime;
                 if (readyTimeMap.contains(callbackID)) {
-                    optionalReadyTime = readyTimeMap.at(callbackID);
+                    readyTime = readyTimeMap.at(callbackID);
                 }
                 if (triggerTimeMap.contains(callbackID)) {
                     const chrono::steady_clock::time_point deadline = triggerTimeMap.at(callbackID);
-                    if (!optionalNearestDeadline.has_value() || deadline < optionalNearestDeadline.value()) {
-                        optionalNearestDeadline = deadline;
+                    if (!nearestDeadline.has_value() || deadline < nearestDeadline.value()) {
+                        nearestDeadline = deadline;
                     }
-                    if (deadline <= now && (!optionalReadyTime.has_value() || deadline < optionalReadyTime.value())) {
-                        optionalReadyTime = deadline;
+                    if (deadline <= now && (!readyTime.has_value() || deadline < readyTime.value())) {
+                        readyTime = deadline;
                     }
                 }
-                if (!optionalReadyTime.has_value()) {
+                if (!readyTime.has_value()) {
                     continue;
                 }
-                if (!optionalRecord.has_value() || optionalReadyTime.value() < optionalRecord.value().readyTime ||
-                    (optionalReadyTime.value() == optionalRecord.value().readyTime && callbackID < optionalRecord.value().callbackID)) {
-                    optionalRecord = Record{
+                if (!record.has_value() || readyTime.value() < record.value().readyTime ||
+                    (readyTime.value() == record.value().readyTime && callbackID < record.value().callbackID)) {
+                    record = Record{
                         .callbackID = callbackID,
-                        .readyTime = optionalReadyTime.value(),
+                        .readyTime = readyTime.value(),
                     };
                 }
             }
-            if (optionalRecord.has_value()) {
-                record = optionalRecord.value();
+            if (record.has_value()) {
+                record = record.value();
                 record.callback = callbackMap.at(record.callbackID);
                 callbackMap.erase(record.callbackID);
                 triggerTimeMap.erase(record.callbackID);
@@ -225,8 +225,8 @@ errors::Error Scheduler::runNext() {
             }
             // Recheck after notification, timeout, or spurious wakeup. The shared
             // mutex prevents a lost check-to-sleep notification.
-            if (optionalNearestDeadline.has_value()) {
-                conditionVariable.wait_until(lock, optionalNearestDeadline.value());
+            if (nearestDeadline.has_value()) {
+                conditionVariable.wait_until(lock, nearestDeadline.value());
             } else {
                 conditionVariable.wait(lock);
             }
@@ -264,11 +264,11 @@ errors::Error Scheduler::clear() {
         readyTimeMap.clear();
     }
     errors::Error firstError;
-    std::optional<JSValue> optionalFirstJSException;
+    std::optional<JSValue> firstJSException;
     // Preserve an exception already pending on entry while allowing cleanups to
     // call QuickJS with no exception pending.
     if (JS_HasException(jsContext)) {
-        optionalFirstJSException = JS_GetException(jsContext);
+        firstJSException = JS_GetException(jsContext);
         firstError = errors::Error{
             .errorCode = ErrorCode::JSException,
             .errorMessage = "JavaScript exception was pending before clear()",
@@ -290,7 +290,7 @@ errors::Error Scheduler::clear() {
                 error.errorMessage = "Cleanup left a pending JavaScript exception";
             }
             if (!firstError.errorCode) {
-                optionalFirstJSException = exception;
+                firstJSException = exception;
             } else {
                 JS_FreeValue(jsContext, exception);
             }
@@ -305,8 +305,8 @@ errors::Error Scheduler::clear() {
     pendingCallbacks.clear();
     pendingCleanups.clear();
     clearing = false;
-    if (optionalFirstJSException.has_value()) {
-        JS_Throw(jsContext, optionalFirstJSException.value());
+    if (firstJSException.has_value()) {
+        JS_Throw(jsContext, firstJSException.value());
     }
     return firstError;
 }
