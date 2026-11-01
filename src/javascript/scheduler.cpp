@@ -69,10 +69,7 @@ Scheduler::~Scheduler() {
     }
 }
 
-std::expected<int64_t, errors::Error> Scheduler::registerCallback(
-    std::function<errors::Error()> callback,
-    std::optional<chrono::steady_clock::time_point> optionalTriggerTime
-) {
+std::expected<int64_t, errors::Error> Scheduler::registerCallback(std::function<errors::Error()> callback, std::optional<chrono::steady_clock::time_point> optionalTriggerTime) {
     if (this_thread::get_id() != ownerThreadID) {
         return std::unexpected(errors::message("called registerCallback() outside owner thread"));
     }
@@ -171,10 +168,7 @@ errors::Error Scheduler::runNext() {
         return errors::message("called runNext() inside a clear()");
     }
     if (JS_HasException(jsContext)) {
-        return errors::Error{
-            .errorCode = ErrorCode::JSException,
-            .errorMessage = "Cannot run next callback with a pending JavaScript exception",
-        };
+        return errors::message("cannot run next callback with a pending JavaScript exception");
     }
     struct Record {
         int64_t callbackID = 0;
@@ -195,27 +189,29 @@ errors::Error Scheduler::runNext() {
             std::optional<chrono::steady_clock::time_point> optionalNearestDeadline;
             std::optional<Record> optionalRecord;
             for (const std::pair<const int64_t, std::function<errors::Error()>>& entry : callbackMap) {
-                std::optional<chrono::steady_clock::time_point> optionalTriggerTime;
-                if (readyTimeMap.contains(entry.first)) {
-                    optionalTriggerTime = readyTimeMap.at(entry.first);
+                const int64_t callbackID = entry.first;
+                const std::function<errors::Error()> callback = entry.second;
+                std::optional<chrono::steady_clock::time_point> optionalReadyTime;
+                if (readyTimeMap.contains(callbackID)) {
+                    optionalReadyTime = readyTimeMap.at(callbackID);
                 }
-                if (triggerTimeMap.contains(entry.first)) {
-                    const chrono::steady_clock::time_point deadline = triggerTimeMap.at(entry.first);
+                if (triggerTimeMap.contains(callbackID)) {
+                    const chrono::steady_clock::time_point deadline = triggerTimeMap.at(callbackID);
                     if (!optionalNearestDeadline.has_value() || deadline < optionalNearestDeadline.value()) {
                         optionalNearestDeadline = deadline;
                     }
-                    if (deadline <= now && (!optionalTriggerTime.has_value() || deadline < optionalTriggerTime.value())) {
-                        optionalTriggerTime = deadline;
+                    if (deadline <= now && (!optionalReadyTime.has_value() || deadline < optionalReadyTime.value())) {
+                        optionalReadyTime = deadline;
                     }
                 }
-                if (!optionalTriggerTime.has_value()) {
+                if (!optionalReadyTime.has_value()) {
                     continue;
                 }
-                if (!optionalRecord.has_value() || optionalTriggerTime.value() < optionalRecord.value().readyTime ||
-                    (optionalTriggerTime.value() == optionalRecord.value().readyTime && entry.first < optionalRecord.value().callbackID)) {
+                if (!optionalRecord.has_value() || optionalReadyTime.value() < optionalRecord.value().readyTime ||
+                    (optionalReadyTime.value() == optionalRecord.value().readyTime && callbackID < optionalRecord.value().callbackID)) {
                     optionalRecord = Record{
-                        .callbackID = entry.first,
-                        .readyTime = optionalTriggerTime.value(),
+                        .callbackID = callbackID,
+                        .readyTime = optionalReadyTime.value(),
                     };
                 }
             }
