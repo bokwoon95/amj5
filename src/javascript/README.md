@@ -41,6 +41,31 @@ methods are not rebound to local aliases.
 CMake copies `url.js`, `text.js`, and `fetch.js` into the build's `javascript/`
 directory. The host loads the modules and calls their exported installers.
 
+## Static type checking
+
+The JS files use JSDoc types and `// @ts-check`; they remain directly executable
+JavaScript with no transpilation step. The repository-root `tsconfig.json` checks
+all project JS (excluding generated/dependency directories) with strict checking,
+checked indexed access, and exact optional properties. No browser DOM types are
+assumed: the declarations describe only the capabilities this project implements.
+
+Run from the repository root with TypeScript 5.2 or newer:
+
+```sh
+tsc --project tsconfig.json
+```
+
+Native contracts, opaque request handles, callback data, public APIs, and internal
+state are typed. Installer assertion signatures preserve existing target members
+and tell callers which constructors/functions have been installed. Values that
+require JS coercion or runtime validation stay `unknown`, not `any`; JSON results
+also stay `unknown` until the caller validates their shape. Limited assertions at
+dynamic iterator/record boundaries retain runtime protocol checks.
+
+These are static checks, not runtime validation of values produced by C++. Keep
+the native JSDoc contracts synchronized with `url.hpp`/`fetch.hpp`; native boundary
+validation is still necessary. The native build does not require TypeScript.
+
 ## Scheduling and cleanup
 
 The outer owner loop drains all QuickJS jobs, checks its awaited Promise, then

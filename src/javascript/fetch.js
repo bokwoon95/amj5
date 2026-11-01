@@ -1,77 +1,187 @@
-// Fetch subset over NativeFetch::{start,read,close}. JS owns all Promises,
-// cancellation reasons/listeners, Errors, Headers, Response, and reader semantics.
-// URL/TextEncoder/TextDecoder are explicit dependencies, not target lookups.
+// @ts-check
+// Fetch over NativeFetch::{start,read,close}. JS owns Promises and API semantics.
+// URL/text constructors are explicit dependencies, never target lookups.
+
+/** @typedef {[string, string]} HeaderPair */
+/** @typedef {{readonly __nativeFetchRequest: unique symbol}} NativeRequest */
+/** @typedef {{type: string, message: string}} NativeFailure */
+/** @typedef {{status: number, headers: HeaderPair[]}} ResponseMetadata */
+/** @typedef {(failure: NativeFailure | null, metadata: ResponseMetadata | null) => void} HeadersCompletion */
+/** @typedef {(failure: NativeFailure | null, chunk: Uint8Array | null) => void} ReadCompletion */
+/**
+ * NativeFetch::create() contract; keep synchronized with fetch.hpp.
+ * NativeRequest's brand is type-only; JS never inspects native handles.
+ * @typedef {object} NativeFetch
+ * @property {(url: string, method: string, headerPairs: HeaderPair[], bytes: Uint8Array, onHeaders: HeadersCompletion) => NativeRequest} start
+ * @property {(request: NativeRequest, onRead: ReadCompletion) => void} read
+ * @property {(request: NativeRequest) => void} close
+ */
+/**
+ * @template T
+ * @typedef {object} Pending
+ * @property {(value: T) => void} resolve
+ * @property {(reason: unknown) => void} reject
+ */
+/** @typedef {{done: true, value: undefined} | {done: false, value: Uint8Array}} ReadResult */
+/** @typedef {{once?: boolean}} ListenerOptions */
+/**
+ * Minimal AbortSignal contract; no browser DOM library is assumed.
+ * @typedef {object} AbortSignalValue
+ * @property {boolean} aborted
+ * @property {unknown} [reason]
+ * @property {(this: AbortSignalValue, type: "abort", listener: () => void, options?: ListenerOptions) => void} addEventListener
+ * @property {(this: AbortSignalValue, type: "abort", listener: () => void) => void} removeEventListener
+ */
+/**
+ * @typedef {Iterable<HeaderPair> & {
+ *   append(name: unknown, value: unknown): void,
+ *   set(name: unknown, value: unknown): void,
+ *   delete(name: unknown): void,
+ *   get(name: unknown): string | null,
+ *   has(name: unknown): boolean,
+ *   entries(): IterableIterator<HeaderPair>,
+ *   keys(): IterableIterator<string>,
+ *   values(): IterableIterator<string>,
+ *   forEach(callback: (this: unknown, value: string, name: string, headers: HeadersValue) => void, thisArg?: unknown): void
+ * }} HeadersValue
+ */
+/** @typedef {new (init?: unknown) => HeadersValue} HeadersConstructor */
+/** @typedef {{mode?: unknown}} ReaderOptions */
+/**
+ * @typedef {object} ReaderValue
+ * @property {() => Promise<ReadResult>} read
+ * @property {(reason?: unknown) => Promise<void>} cancel
+ * @property {() => void} releaseLock
+ */
+/**
+ * @typedef {{
+ *   readonly locked: boolean,
+ *   getReader(options?: ReaderOptions | null): ReaderValue,
+ *   cancel(reason?: unknown): Promise<void>
+ * }} BodyValue
+ */
+/**
+ * @typedef {{
+ *   readonly status: number,
+ *   readonly ok: boolean,
+ *   readonly headers: HeadersValue,
+ *   readonly url: string,
+ *   readonly body: BodyValue | null,
+ *   readonly bodyUsed: boolean,
+ *   text(): Promise<string>,
+ *   json(): Promise<unknown>
+ * }} ResponseValue
+ */
+/**
+ * @typedef {object} FetchInit
+ * @property {string} [method]
+ * @property {Iterable<readonly [unknown, unknown]> | Record<string, unknown> | null} [headers]
+ * @property {string | Uint8Array | null} [body]
+ * @property {AbortSignalValue | null} [signal]
+ * @property {"error"} [redirect]
+ * @property {undefined} [credentials]
+ * @property {undefined} [cache]
+ * @property {undefined} [integrity]
+ * @property {undefined} [keepalive]
+ * @property {undefined} [mode]
+ */
+/** @typedef {(input: unknown, init?: FetchInit | null) => Promise<ResponseValue>} FetchFunction */
+/** @typedef {{Headers: HeadersConstructor, fetch: FetchFunction}} FetchModule */
+/** @typedef {Error & {errorType: string, errorMessage: string}} FetchError */
+
+/**
+ * @template {object} Target
+ * @param {Target & Partial<FetchModule>} target
+ * @param {NativeFetch} nativeFetch
+ * @param {import("./url.js").URLConstructor} URL
+ * @param {import("./text.js").TextEncoderConstructor} TextEncoder
+ * @param {import("./text.js").TextDecoderConstructor} TextDecoder
+ * @returns {asserts target is Target & FetchModule}
+ */
 export function installFetch(target, nativeFetch, URL, TextEncoder, TextDecoder) {
-    for (const name of ["start", "read", "close"]) {
+    for (const name of /** @type {const} */ (["start", "read", "close"])) {
         if (!nativeFetch || typeof nativeFetch[name] !== "function") throw new TypeError(`Missing native Fetch ${name}`);
     }
     if (typeof URL !== "function" || typeof TextEncoder !== "function" || typeof TextDecoder !== "function") {
         throw new TypeError("Fetch requires URL, TextEncoder, and TextDecoder constructors");
     }
     const bodyLimit = 33554432;
+    /** @type {WeakSet<Headers>} */
     const immutable = new WeakSet();
+    /** @param {unknown} value @returns {string} */
     const normalizeName = (value) => {
         if (typeof value === "symbol") throw new TypeError("Invalid header name");
         const name = String(value).toLowerCase();
         if (!/^[!#$%&'*+.^_`|~0-9a-z-]+$/.test(name)) throw new TypeError("Invalid header name");
         return name;
     };
+    /** @param {unknown} value @returns {string} */
     const normalizeValue = (value) => {
         if (typeof value === "symbol") throw new TypeError("Invalid header value");
         const text = String(value);
         if (/[\x00-\x08\x0a-\x1f\x7f]/.test(text)) throw new TypeError("Invalid header value");
         return text.replace(/^[\t ]+|[\t ]+$/g, "");
     };
+    /** @param {NativeFailure} failure @returns {FetchError} */
     const completionError = (failure) => {
         let error;
         if (failure.type === "LimitExceeded") error = new RangeError(failure.message);
         else error = new TypeError(failure.message);
-        error.errorType = failure.type;
-        error.errorMessage = failure.message;
-        return error;
+        return Object.assign(error, { errorType: failure.type, errorMessage: failure.message });
     };
     class Headers {
+        /** @type {Map<string, string>} */
         #values = new Map();
+        /** @param {unknown} [init] */
         constructor(init) {
             if (init === undefined || init === null) return;
             if (typeof init !== "object" && typeof init !== "function") throw new TypeError("Invalid Headers initializer");
-            if (typeof init[Symbol.iterator] === "function") {
-                for (const pair of init) {
+            const properties = /** @type {Record<PropertyKey, unknown>} */ (init);
+            if (typeof properties[Symbol.iterator] === "function") {
+                // Iteration checks the dynamic protocol; fields remain unknown.
+                for (const pair of /** @type {Iterable<unknown>} */ (init)) {
                     if (pair === null || (typeof pair !== "object" && typeof pair !== "function")) throw new TypeError("Headers require name/value pairs");
-                    const fields = Array.from(pair);
+                    const fields = Array.from(/** @type {Iterable<unknown>} */ (pair));
                     if (fields.length !== 2) throw new TypeError("Headers require name/value pairs");
                     this.append(fields[0], fields[1]);
                 }
             } else {
-                for (const [name, value] of Object.entries(init)) this.append(name, value);
+                for (const [name, value] of Object.entries(properties)) this.append(name, value);
             }
         }
+        /** @param {unknown} name @param {unknown} value @returns {void} */
         append(name, value) {
             if (arguments.length < 2) throw new TypeError("append requires a name and value");
             if (immutable.has(this)) throw new TypeError("Response headers are immutable");
-            name = normalizeName(name);
-            value = normalizeValue(value);
-            if (this.#values.has(name)) value = this.#values.get(name) + ", " + value;
-            this.#values.set(name, value);
+            const nameText = normalizeName(name);
+            let valueText = normalizeValue(value);
+            const previous = this.#values.get(nameText);
+            if (previous !== undefined) valueText = previous + ", " + valueText;
+            this.#values.set(nameText, valueText);
         }
+        /** @param {unknown} name @param {unknown} value @returns {void} */
         set(name, value) {
             if (arguments.length < 2) throw new TypeError("set requires a name and value");
             if (immutable.has(this)) throw new TypeError("Response headers are immutable");
             this.#values.set(normalizeName(name), normalizeValue(value));
         }
+        /** @param {unknown} name @returns {void} */
         delete(name) {
             if (arguments.length < 1) throw new TypeError("delete requires a name");
             if (immutable.has(this)) throw new TypeError("Response headers are immutable");
             this.#values.delete(normalizeName(name));
         }
+        /** @param {unknown} name @returns {string | null} */
         get(name) {
             if (arguments.length < 1) throw new TypeError("get requires a name");
             return this.#values.get(normalizeName(name)) ?? null;
         }
+        /** @param {unknown} name @returns {boolean} */
         has(name) {
             if (arguments.length < 1) throw new TypeError("has requires a name");
             return this.#values.has(normalizeName(name));
         }
+        /** @returns {Generator<HeaderPair, void, undefined>} */
         *entries() {
             yield* Array.from(this.#values).sort((left, right) => {
                 if (left[0] < right[0]) return -1;
@@ -79,26 +189,38 @@ export function installFetch(target, nativeFetch, URL, TextEncoder, TextDecoder)
                 return 0;
             });
         }
+        /** @returns {Generator<string, void, unknown>} */
         *keys() { for (const [name] of this.entries()) yield name; }
+        /** @returns {Generator<string, void, unknown>} */
         *values() { for (const [, value] of this.entries()) yield value; }
         [Symbol.iterator]() { return this.entries(); }
+        /** @param {(this: unknown, value: string, name: string, headers: HeadersValue) => void} callback @param {unknown} [thisArg] @returns {void} */
         forEach(callback, thisArg) {
             if (typeof callback !== "function") throw new TypeError("Expected a callback");
             for (const [name, value] of this.entries()) callback.call(thisArg, value, name, this);
         }
     }
     class RequestState {
+        /** @type {NativeRequest | null} */
         request = null;
+        /** @type {Pending<ResponseMetadata> | null} */
         headers = null;
+        /** @type {Pending<ReadResult> | null} */
         reading = null;
         ended = false;
         failed = false;
+        /** @type {unknown} */
         reason = undefined;
         disturbed = false;
+        /** @type {Reader | null} */
         reader = null;
+        /** @type {AbortSignalValue | null} */
         signal = null;
+        /** @type {(() => void) | null} */
         listener = null;
+        /** @type {AbortSignalValue["removeEventListener"] | null} */
         removeListener = null;
+        /** @param {AbortSignalValue | null} signal @returns {void} */
         attachSignal(signal) {
             if (signal === null) return;
             const addListener = signal.addEventListener;
@@ -110,8 +232,9 @@ export function installFetch(target, nativeFetch, URL, TextEncoder, TextDecoder)
                 if (this.ended) return;
                 let reason = signal.reason;
                 if (reason === undefined) {
-                    reason = new Error("The operation was aborted");
-                    reason.name = "AbortError";
+                    const error = new Error("The operation was aborted");
+                    error.name = "AbortError";
+                    reason = error;
                 }
                 this.fail(reason);
             };
@@ -131,9 +254,13 @@ export function installFetch(target, nativeFetch, URL, TextEncoder, TextDecoder)
                 this.signal = null;
                 this.listener = null;
                 this.removeListener = null;
-                if (signal !== null) removeListener.call(signal, "abort", listener);
+                if (signal !== null) {
+                    if (listener === null || removeListener === null) throw new TypeError("Missing abort subscription");
+                    removeListener.call(signal, "abort", listener);
+                }
             }
         }
+        /** @param {unknown} reason @returns {void} */
         fail(reason) {
             if (this.ended) return;
             this.ended = true;
@@ -160,24 +287,30 @@ export function installFetch(target, nativeFetch, URL, TextEncoder, TextDecoder)
             this.ended = true;
             this.dispose();
         }
+        /** @param {NativeFailure | null} failure @param {ResponseMetadata | null} metadata @returns {void} */
         receiveHeaders(failure, metadata) {
             const headers = this.headers;
             this.headers = null;
             if (headers === null) return;
-            if (failure !== null) {
-                const error = completionError(failure);
+            if (failure !== null || metadata === null) {
+                let error;
+                if (failure !== null) error = completionError(failure);
+                else error = new TypeError("Missing native response metadata");
                 headers.reject(error);
                 this.fail(error);
             } else headers.resolve(metadata);
         }
+        /** @returns {Promise<ReadResult>} */
         async read() {
             if (this.failed) throw this.reason;
             if (this.ended) return { value: undefined, done: true };
             if (this.reading !== null) throw new TypeError("Only one outstanding read is supported");
+            const request = this.request;
+            if (request === null) throw new TypeError("HTTP request is closed");
             return new Promise((resolve, reject) => {
                 this.reading = { resolve, reject };
                 try {
-                    nativeFetch.read(this.request, (failure, chunk) => {
+                    nativeFetch.read(request, (failure, chunk) => {
                         const reading = this.reading;
                         this.reading = null;
                         if (reading === null) return;
@@ -203,10 +336,13 @@ export function installFetch(target, nativeFetch, URL, TextEncoder, TextDecoder)
         }
     }
     class Reader {
+        /** @type {RequestState} */
         #state;
         #pending = false;
         #released = false;
+        /** @param {RequestState} state */
         constructor(state) { this.#state = state; }
+        /** @returns {Promise<ReadResult>} */
         async read() {
             if (this.#released) throw new TypeError("Reader lock was released");
             if (this.#pending) throw new TypeError("Only one outstanding read is supported");
@@ -215,6 +351,7 @@ export function installFetch(target, nativeFetch, URL, TextEncoder, TextDecoder)
             try { return await this.#state.read(); }
             finally { this.#pending = false; }
         }
+        /** @param {unknown} [reason] @returns {Promise<void>} */
         async cancel(reason) {
             if (this.#released) throw new TypeError("Reader lock was released");
             this.#state.disturbed = true;
@@ -228,9 +365,12 @@ export function installFetch(target, nativeFetch, URL, TextEncoder, TextDecoder)
         }
     }
     class Body {
+        /** @type {RequestState} */
         #state;
+        /** @param {RequestState} state */
         constructor(state) { this.#state = state; }
         get locked() { return this.#state.reader !== null; }
+        /** @param {ReaderOptions | null} [options] @returns {Reader} */
         getReader(options) {
             if (options && options.mode !== undefined) throw new TypeError("BYOB readers are not supported");
             if (this.locked) throw new TypeError("Response body is locked");
@@ -238,6 +378,7 @@ export function installFetch(target, nativeFetch, URL, TextEncoder, TextDecoder)
             this.#state.reader = reader;
             return reader;
         }
+        /** @param {unknown} [reason] @returns {Promise<void>} */
         async cancel(reason) {
             if (this.locked) throw new TypeError("Response body is locked");
             this.#state.disturbed = true;
@@ -245,11 +386,17 @@ export function installFetch(target, nativeFetch, URL, TextEncoder, TextDecoder)
         }
     }
     class Response {
+        /** @type {RequestState} */
         #state;
+        /** @type {number} */
         #status;
+        /** @type {Headers} */
         #headers;
+        /** @type {Body | null} */
         #body;
+        /** @type {string} */
         #url;
+        /** @param {RequestState} state @param {ResponseMetadata} metadata @param {string} url @param {string} method */
         constructor(state, metadata, url, method) {
             this.#state = state;
             this.#status = metadata.status;
@@ -268,11 +415,13 @@ export function installFetch(target, nativeFetch, URL, TextEncoder, TextDecoder)
         get url() { return this.#url; }
         get body() { return this.#body; }
         get bodyUsed() { return this.#state.disturbed; }
+        /** @returns {Promise<string>} */
         async text() {
             if (this.#body === null) return "";
             if (this.bodyUsed || this.#body.locked) throw new TypeError("Response body is already used or locked");
             const decoder = new TextDecoder();
             const reader = this.#body.getReader();
+            /** @type {string[]} */
             const parts = [];
             let bytes = 0;
             try {
@@ -292,10 +441,12 @@ export function installFetch(target, nativeFetch, URL, TextEncoder, TextDecoder)
                 reader.releaseLock();
             }
         }
+        /** @returns {Promise<unknown>} */
         async json() { return JSON.parse(await this.text()); }
     }
     target.Headers = Headers;
-    target.fetch = async function fetch(input, init) {
+    /** @param {unknown} input @param {FetchInit | null} [init] @returns {Promise<Response>} */
+    async function fetch(input, init) {
         if (init === undefined || init === null) init = {};
         if (typeof input === "symbol") throw new TypeError("Invalid fetch URL");
         const url = new URL(String(input));
@@ -309,10 +460,11 @@ export function installFetch(target, nativeFetch, URL, TextEncoder, TextDecoder)
         }
         if (!/^[!#$%&'*+.^_`|~0-9A-Z-]+$/.test(method) || ["CONNECT", "TRACE", "TRACK"].includes(method)) throw new TypeError("Invalid HTTP method");
         if (init.redirect !== undefined && init.redirect !== "error") throw new TypeError("Only redirect:error is supported");
-        for (const name of ["credentials", "cache", "integrity", "keepalive", "mode"]) {
+        for (const name of /** @type {const} */ (["credentials", "cache", "integrity", "keepalive", "mode"])) {
             if (init[name] !== undefined) throw new TypeError(`Fetch option ${name} is not supported`);
         }
         const headers = new Headers(init.headers);
+        /** @type {Uint8Array} */
         let body = new Uint8Array(0);
         if (init.body !== undefined && init.body !== null) {
             if (method === "GET" || method === "HEAD") throw new TypeError("GET/HEAD cannot have a body");
@@ -323,18 +475,21 @@ export function installFetch(target, nativeFetch, URL, TextEncoder, TextDecoder)
             else throw new TypeError("Only string/Uint8Array bodies are supported");
         }
         if (body.byteLength > bodyLimit) throw new RangeError("Request body exceeds 32 MiB");
+        /** @type {AbortSignalValue | null} */
         let signal = null;
         if (init.signal !== undefined && init.signal !== null) signal = init.signal;
         if (signal !== null && signal.aborted) {
             let reason = signal.reason;
             if (reason === undefined) {
-                reason = new Error("The operation was aborted");
-                reason.name = "AbortError";
+                const error = new Error("The operation was aborted");
+                error.name = "AbortError";
+                reason = error;
             }
             throw reason;
         }
         const state = new RequestState();
         try {
+            /** @type {ResponseMetadata} */
             const metadata = await new Promise((resolve, reject) => {
                 state.headers = { resolve, reject };
                 try {
@@ -350,5 +505,6 @@ export function installFetch(target, nativeFetch, URL, TextEncoder, TextDecoder)
             state.fail(error);
             throw error;
         }
-    };
+    }
+    target.fetch = fetch;
 }

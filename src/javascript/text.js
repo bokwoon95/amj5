@@ -1,9 +1,38 @@
+// @ts-check
 // UTF-8 subset of TextEncoder/TextDecoder, including incremental decoding.
-// Replaces only these constructors on target. No other polyfills or native
-// bindings are required, and globalThis is not read or modified.
+// No other polyfills or native bindings are required. Globals are not modified.
+
+/** @typedef {{fatal?: unknown, ignoreBOM?: unknown}} DecoderOptions */
+/** @typedef {{stream?: unknown}} DecodeOptions */
+/** @typedef {ArrayBuffer | ArrayBufferView} ByteSource */
+/**
+ * @typedef {{
+ *   readonly encoding: "utf-8",
+ *   encode(input?: unknown): Uint8Array
+ * }} TextEncoderValue
+ */
+/**
+ * @typedef {{
+ *   readonly encoding: "utf-8",
+ *   readonly fatal: boolean,
+ *   readonly ignoreBOM: boolean,
+ *   decode(input?: ByteSource, options?: DecodeOptions | null): string
+ * }} TextDecoderValue
+ */
+/** @typedef {new () => TextEncoderValue} TextEncoderConstructor */
+/** @typedef {new (label?: unknown, options?: DecoderOptions | null) => TextDecoderValue} TextDecoderConstructor */
+/** @typedef {{TextEncoder: TextEncoderConstructor, TextDecoder: TextDecoderConstructor}} TextModule */
+
+/**
+ * @template {object} Target
+ * @param {Target & Partial<TextModule>} target
+ * @returns {asserts target is Target & TextModule}
+ */
 export function installText(target) {
     target.TextEncoder = class TextEncoder {
+        /** @returns {"utf-8"} */
         get encoding() { return "utf-8"; }
+        /** @param {unknown} [input] @returns {Uint8Array} */
         encode(input) {
             if (typeof input === "symbol") throw new TypeError("Cannot encode a Symbol");
             let text = "";
@@ -11,6 +40,7 @@ export function installText(target) {
             let length = 0;
             for (const character of text) {
                 const point = character.codePointAt(0);
+                if (point === undefined) throw new TypeError("Unexpected empty string character");
                 if (point < 0x80) length++;
                 else if (point < 0x800) length += 2;
                 else if (point < 0x10000) length += 3;
@@ -20,6 +50,7 @@ export function installText(target) {
             let offset = 0;
             for (const character of text) {
                 let point = character.codePointAt(0);
+                if (point === undefined) throw new TypeError("Unexpected empty string character");
                 if (point >= 0xd800 && point <= 0xdfff) point = 0xfffd;
                 if (point < 0x80) {
                     bytes[offset++] = point;
@@ -49,6 +80,7 @@ export function installText(target) {
         #lower = 0x80;
         #upper = 0xbf;
         #bomSeen = false;
+        /** @param {unknown} [label] @param {DecoderOptions | null} [options] */
         constructor(label, options) {
             if (typeof label === "symbol") throw new TypeError("Decoder label cannot be a Symbol");
             if (label !== undefined && !["utf-8", "utf8", "unicode-1-1-utf-8"].includes(String(label).trim().toLowerCase())) {
@@ -59,10 +91,13 @@ export function installText(target) {
                 this.#ignoreBOM = Boolean(options.ignoreBOM);
             }
         }
+        /** @returns {"utf-8"} */
         get encoding() { return "utf-8"; }
         get fatal() { return this.#fatal; }
         get ignoreBOM() { return this.#ignoreBOM; }
+        /** @param {ByteSource} [input] @param {DecodeOptions | null} [options] @returns {string} */
         decode(input, options) {
+            /** @type {Uint8Array} */
             let bytes = new Uint8Array(0);
             if (input instanceof ArrayBuffer) {
                 bytes = new Uint8Array(input);
@@ -70,7 +105,9 @@ export function installText(target) {
                 if (!ArrayBuffer.isView(input)) throw new TypeError("Expected an ArrayBuffer or view");
                 bytes = new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
             }
+            /** @type {string[]} */
             const characters = [];
+            /** @param {number} point @returns {void} */
             const emit = (point) => {
                 if (!this.#bomSeen) {
                     this.#bomSeen = true;
@@ -92,6 +129,7 @@ export function installText(target) {
             };
             for (let index = 0; index < bytes.length; index++) {
                 const byte = bytes[index];
+                if (byte === undefined) throw new RangeError("Invalid UTF-8 byte index");
                 if (this.#needed === 0) {
                     if (byte <= 0x7f) emit(byte);
                     else if (byte >= 0xc2 && byte <= 0xdf) {
