@@ -54,7 +54,7 @@ class Scheduler {
     // Unknown IDs are ignored.
     [[nodiscard]] errors::Error unregisterCallback(int64_t callbackID);
 
-    // Thread-safe. Records when first marked ready and wakes wait(). Repeated
+    // Thread-safe. Records when first marked ready and wakes runNext(). Repeated
     // calls coalesce; unknown/removed IDs are ignored. Never executes JS or
     // accesses the JS context.
     [[nodiscard]] errors::Error markReady(int64_t callbackID);
@@ -65,13 +65,11 @@ class Scheduler {
     // unregister callbacks: modules manage those independently.
     [[nodiscard]] errors::Error cleanup(int64_t cleanupID);
 
-    // Dispatches a snapshot ordered by earliest readiness timestamp/elapsed deadline,
-    // then ID. Removes callbacks before invocation; yields to pending JS jobs.
-    [[nodiscard]] errors::Error dispatch();
-
-    // Executes no callbacks/JS. Returns for pending jobs or ready callbacks;
-    // otherwise waits for explicit readiness or a deadline. No callbacks means Stalled.
-    [[nodiscard]] errors::Error wait();
+    // Waits for and executes one callback, choosing the earliest readiness
+    // timestamp/elapsed deadline, then ID. Removes it before invocation and runs
+    // it outside the mutex. No callbacks means Stalled. The caller must drain
+    // pending JS jobs and check its awaited Promise before each call.
+    [[nodiscard]] errors::Error runNext();
 
     // Removes all callbacks/cleanups, attempts every cleanup, returns the first
     // failure, preserving its JS exception if applicable. Remains reusable.

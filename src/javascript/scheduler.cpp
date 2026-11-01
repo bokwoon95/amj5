@@ -5,7 +5,6 @@
 #include <limits>
 #include <quickjs.h>
 
-#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <exception>
@@ -19,12 +18,10 @@
 #include <system_error>
 #include <thread>
 #include <utility>
-#include <vector>
 
 namespace amj::javascript {
 namespace chrono = std::chrono;
 namespace errors = amj::errors;
-namespace ranges = std::ranges;
 namespace this_thread = std::this_thread;
 namespace {
 
@@ -166,134 +163,91 @@ errors::Error Scheduler::cleanup(int64_t cleanupID) {
     return error;
 }
 
-errors::Error Scheduler::dispatch() {
+errors::Error Scheduler::runNext() {
     if (this_thread::get_id() != ownerThreadID) {
-        return errors::message("called dispatch() outside owner thread");
+        return errors::message("called runNext() outside owner thread");
     }
     if (clearing) {
-        return errors::message("called dispatch() inside a clear()");
+        return errors::message("called runNext() inside a clear()");
     }
     if (JS_HasException(jsContext)) {
         return errors::Error{
             .errorCode = ErrorCode::JSException,
-            .errorMessage = "Cannot dispatch with a pending JavaScript exception",
+            .errorMessage = "Cannot run next callback with a pending JavaScript exception",
         };
-    }
-    // Promise continuations must get a chance to clear timers between
-    // callbacks.
-    if (JS_IsJobPending(JS_GetRuntime(jsContext))) {
-        return {};
     }
     struct Record {
         int64_t callbackID = 0;
         std::function<errors::Error()> callback = {};
         chrono::steady_clock::time_point readyTime = {};
     };
-    const chrono::steady_clock::time_point now = chrono::steady_clock::now();
-    std::vector<Record> records = {};
+    Record record;
     {
-        const std::lock_guard<std::mutex> lock(mutex);
-        records.reserve(callbackMap.size());
-        for (const std::pair<const int64_t, std::function<errors::Error()>>& entry : callbackMap) {
-            std::optional<chrono::steady_clock::time_point> optionalTriggerTime;
-            if (readyTimeMap.contains(entry.first)) {
-                optionalTriggerTime = readyTimeMap.at(entry.first);
+        std::unique_lock<std::mutex> lock(mutex);
+        while (true) {
+            if (callbackMap.empty()) {
+                return errors::Error{
+                    .errorCode = ErrorCode::Stalled,
+                    .errorMessage = "No scheduled callback can make progress; invocation is stalled",
+                };
             }
-            if (triggerTimeMap.contains(entry.first)) {
-                const chrono::steady_clock::time_point deadline = triggerTimeMap.at(entry.first);
-                if (deadline <= now && (!optionalTriggerTime.has_value() || deadline < optionalTriggerTime.value())) {
-                    optionalTriggerTime = deadline;
+            const chrono::steady_clock::time_point now = chrono::steady_clock::now();
+            std::optional<chrono::steady_clock::time_point> optionalNearestDeadline;
+            std::optional<Record> optionalRecord;
+            for (const std::pair<const int64_t, std::function<errors::Error()>>& entry : callbackMap) {
+                std::optional<chrono::steady_clock::time_point> optionalTriggerTime;
+                if (readyTimeMap.contains(entry.first)) {
+                    optionalTriggerTime = readyTimeMap.at(entry.first);
+                }
+                if (triggerTimeMap.contains(entry.first)) {
+                    const chrono::steady_clock::time_point deadline = triggerTimeMap.at(entry.first);
+                    if (!optionalNearestDeadline.has_value() || deadline < optionalNearestDeadline.value()) {
+                        optionalNearestDeadline = deadline;
+                    }
+                    if (deadline <= now && (!optionalTriggerTime.has_value() || deadline < optionalTriggerTime.value())) {
+                        optionalTriggerTime = deadline;
+                    }
+                }
+                if (!optionalTriggerTime.has_value()) {
+                    continue;
+                }
+                if (!optionalRecord.has_value() || optionalTriggerTime.value() < optionalRecord.value().readyTime ||
+                    (optionalTriggerTime.value() == optionalRecord.value().readyTime && entry.first < optionalRecord.value().callbackID)) {
+                    optionalRecord = Record{
+                        .callbackID = entry.first,
+                        .readyTime = optionalTriggerTime.value(),
+                    };
                 }
             }
-            if (optionalTriggerTime.has_value()) {
-                records.push_back(Record{
-                    .callbackID = entry.first,
-                    .callback = entry.second,
-                    .readyTime = optionalTriggerTime.value(),
-                });
+            if (optionalRecord.has_value()) {
+                record = optionalRecord.value();
+                record.callback = callbackMap.at(record.callbackID);
+                callbackMap.erase(record.callbackID);
+                triggerTimeMap.erase(record.callbackID);
+                readyTimeMap.erase(record.callbackID);
+                break;
+            }
+            // Recheck after notification, timeout, or spurious wakeup. The shared
+            // mutex prevents a lost check-to-sleep notification.
+            if (optionalNearestDeadline.has_value()) {
+                conditionVariable.wait_until(lock, optionalNearestDeadline.value());
+            } else {
+                conditionVariable.wait(lock);
             }
         }
     }
-    ranges::sort(records, [](const Record& left, const Record& right) {
-        if (left.readyTime != right.readyTime) {
-            return left.readyTime < right.readyTime;
-        }
-        return left.callbackID < right.callbackID;
-    });
-    for (const Record& record : records) {
-        {
-            const std::lock_guard<std::mutex> lock(mutex);
-            if (!callbackMap.contains(record.callbackID)) {
-                continue; // Earlier callbacks may unregister other callbacks.
-            }
-            callbackMap.erase(record.callbackID);
-            triggerTimeMap.erase(record.callbackID);
-            readyTimeMap.erase(record.callbackID);
-        }
-        errors::Error error;
-        try {
-            error = record.callback();
-        } catch (const std::exception& exception) {
-            error = errors::message(std::string("Callback threw a C++ exception: ") + exception.what());
-        } catch (...) {
-            error = errors::message("Callback threw an unknown C++ exception");
-        }
-        if (JS_HasException(jsContext)) {
-            error.errorCode = ErrorCode::JSException;
-        }
-        if (error.errorCode) {
-            return error;
-        }
-        if (JS_IsJobPending(JS_GetRuntime(jsContext))) {
-            return {};
-        }
-    }
-    return {};
-}
-
-errors::Error Scheduler::wait() {
-    if (this_thread::get_id() != ownerThreadID || clearing) {
-        return errors::message("Wait requires the owner thread outside clear()");
+    errors::Error error;
+    try {
+        error = record.callback();
+    } catch (const std::exception& exception) {
+        error = errors::message(std::string("Callback threw a C++ exception: ") + exception.what());
+    } catch (...) {
+        error = errors::message("Callback threw an unknown C++ exception");
     }
     if (JS_HasException(jsContext)) {
-        return errors::Error{
-            .errorCode = ErrorCode::JSException,
-            .errorMessage = "Cannot wait with a pending JavaScript exception",
-        };
+        error.errorCode = ErrorCode::JSException;
     }
-    // Only the owner thread can enqueue JS jobs; workers only call markReady().
-    if (JS_IsJobPending(JS_GetRuntime(jsContext))) {
-        return {};
-    }
-    std::unique_lock<std::mutex> lock(mutex);
-    while (true) {
-        if (callbackMap.empty()) {
-            return errors::Error{
-                .errorCode = ErrorCode::Stalled,
-                .errorMessage = "No scheduled callback can make progress; invocation is stalled",
-            };
-        }
-        if (!readyTimeMap.empty()) {
-            return {};
-        }
-        const chrono::steady_clock::time_point now = chrono::steady_clock::now();
-        std::optional<chrono::steady_clock::time_point> optionalNearestDeadline;
-        for (const std::pair<const int64_t, chrono::steady_clock::time_point>& deadline : triggerTimeMap) {
-            if (deadline.second <= now) {
-                return {};
-            }
-            if (!optionalNearestDeadline.has_value() || deadline.second < optionalNearestDeadline.value()) {
-                optionalNearestDeadline = deadline.second;
-            }
-        }
-        // Check the predicate manually after notification, timeout, or spurious
-        // wakeup. The shared mutex prevents a lost check-to-sleep notification.
-        if (optionalNearestDeadline.has_value()) {
-            conditionVariable.wait_until(lock, optionalNearestDeadline.value());
-        } else {
-            conditionVariable.wait(lock);
-        }
-    }
+    return error;
 }
 
 errors::Error Scheduler::clear() {
