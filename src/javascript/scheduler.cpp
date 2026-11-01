@@ -237,16 +237,16 @@ errors::Error Scheduler::clear() {
     if (this_thread::get_id() != ownerThreadID) {
         return errors::message("Clear requires the owner thread");
     }
-    std::map<int64_t, std::function<errors::Error()>> pendingCallbacks;
-    std::map<int64_t, std::function<errors::Error()>> pendingCleanups;
+    std::map<int64_t, std::function<errors::Error()>> pendingCallbackMap;
+    std::map<int64_t, std::function<errors::Error()>> pendingCleanupMap;
     {
         const std::lock_guard<std::mutex> lock(mutex);
         if (clearing) {
             return {};
         }
         clearing = true;
-        pendingCallbacks.swap(callbackMap);
-        pendingCleanups.swap(cleanupMap);
+        pendingCallbackMap.swap(callbackMap);
+        pendingCleanupMap.swap(cleanupMap);
         triggerTimeMap.clear();
         readyTimeMap.clear();
     }
@@ -261,7 +261,7 @@ errors::Error Scheduler::clear() {
             .errorMessage = "JavaScript exception was pending before clear()",
         };
     }
-    for (const std::pair<const int64_t, std::function<errors::Error()>>& pending : pendingCleanups) {
+    for (const std::pair<const int64_t, std::function<errors::Error()>>& pending : pendingCleanupMap) {
         errors::Error error;
         try {
             error = pending.second();
@@ -286,8 +286,8 @@ errors::Error Scheduler::clear() {
             firstError = error;
         }
     }
-    pendingCallbacks.clear();
-    pendingCleanups.clear();
+    pendingCallbackMap.clear();
+    pendingCleanupMap.clear();
     {
         const std::lock_guard<std::mutex> lock(mutex);
         clearing = false;
