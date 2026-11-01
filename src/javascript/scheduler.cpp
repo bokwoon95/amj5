@@ -24,6 +24,7 @@
 namespace amj::javascript {
 namespace chrono = std::chrono;
 namespace errors = amj::errors;
+namespace ranges = std::ranges;
 namespace this_thread = std::this_thread;
 namespace {
 
@@ -178,15 +179,21 @@ errors::Error Scheduler::dispatch() {
             .errorMessage = "Cannot dispatch with a pending JavaScript exception",
         };
     }
-    // Promise continuations must get a chance to clear timers between callbacks.
+    // Promise continuations must get a chance to clear timers between
+    // callbacks.
     if (JS_IsJobPending(JS_GetRuntime(jsContext))) {
         return {};
     }
+    struct Record {
+        int64_t callbackID = 0;
+        std::function<errors::Error()> callback = {};
+        chrono::steady_clock::time_point readyTime = {};
+    };
     const chrono::steady_clock::time_point now = chrono::steady_clock::now();
-    std::vector<std::pair<chrono::steady_clock::time_point, int64_t>> ready;
+    std::vector<Record> records = {};
     {
         const std::lock_guard<std::mutex> lock(mutex);
-        ready.reserve(callbackMap.size());
+        records.reserve(callbackMap.size());
         for (const std::pair<const int64_t, std::function<errors::Error()>>& entry : callbackMap) {
             std::optional<chrono::steady_clock::time_point> optionalTriggerTime;
             if (readyTimeMap.contains(entry.first)) {
@@ -199,28 +206,33 @@ errors::Error Scheduler::dispatch() {
                 }
             }
             if (optionalTriggerTime.has_value()) {
-                ready.push_back({optionalTriggerTime.value(), entry.first});
+                records.push_back(Record{
+                    .callbackID = entry.first,
+                    .callback = entry.second,
+                    .readyTime = optionalTriggerTime.value(),
+                });
             }
         }
     }
-    std::ranges::sort(ready);
-    for (const std::pair<chrono::steady_clock::time_point, int64_t>& readyCallback : ready) {
-        std::function<errors::Error()> callback;
+    ranges::sort(records, [](const Record& left, const Record& right) {
+        if (left.readyTime != right.readyTime) {
+            return left.readyTime < right.readyTime;
+        }
+        return left.callbackID < right.callbackID;
+    });
+    for (const Record& record : records) {
         {
             const std::lock_guard<std::mutex> lock(mutex);
-            if (callbackMap.contains(readyCallback.second)) {
-                callback = callbackMap.at(readyCallback.second);
-                callbackMap.erase(readyCallback.second);
+            if (!callbackMap.contains(record.callbackID)) {
+                continue; // Earlier callbacks may unregister other callbacks.
             }
-            triggerTimeMap.erase(readyCallback.second);
-            readyTimeMap.erase(readyCallback.second);
-        }
-        if (callback == nullptr) {
-            continue; // Earlier callbacks may unregister other callbacks.
+            callbackMap.erase(record.callbackID);
+            triggerTimeMap.erase(record.callbackID);
+            readyTimeMap.erase(record.callbackID);
         }
         errors::Error error;
         try {
-            error = callback();
+            error = record.callback();
         } catch (const std::exception& exception) {
             error = errors::message(std::string("Callback threw a C++ exception: ") + exception.what());
         } catch (...) {
@@ -228,12 +240,6 @@ errors::Error Scheduler::dispatch() {
         }
         if (JS_HasException(jsContext)) {
             error.errorCode = ErrorCode::JSException;
-            if (error.errorMessage.empty()) {
-                error.errorMessage = "Callback left a pending JavaScript exception";
-            }
-        } else if (error.errorCode == ErrorCode::JSException) {
-            error.errorCode = errors::ErrorCode::GenericError;
-            error.errorMessage = "Callback returned JSException without a pending JavaScript exception";
         }
         if (error.errorCode) {
             return error;
