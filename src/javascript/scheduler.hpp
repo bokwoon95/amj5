@@ -33,7 +33,7 @@ enum class ErrorCode : std::uint8_t {
 // the scheduler on its constructing thread. The borrowed context must outlive it.
 //
 // Supplied functions return zero-code Error for success. Pending JS exceptions
-// after supplied functions execute are reported as JSException. Error codes
+// after callbacks execute are reported as JSException. Error codes
 // returned by supplied functions are not validated against the JS exception state.
 // Unexpected C++ exceptions from supplied functions become GenericError.
 // Allocation/synchronization failures in scheduler operations may still throw.
@@ -59,6 +59,8 @@ class Scheduler {
     // accesses the JS context.
     [[nodiscard]] errors::Error markReady(int64_t callbackID);
 
+    // Cleanups only cancel native operations and release resources. They must not
+    // execute JS or modify the pending JS exception; JS cleanup belongs in finally.
     [[nodiscard]] std::expected<int64_t, errors::Error> registerCleanup(std::function<errors::Error()> cleanup);
 
     // Removes before invoking, so repeat/reentrant calls are no-ops. Does not
@@ -72,7 +74,7 @@ class Scheduler {
     [[nodiscard]] errors::Error runNext();
 
     // Removes all callbacks/cleanups, attempts every cleanup, returns the first
-    // failure, preserving its JS exception if applicable. Remains reusable.
+    // cleanup failure. Leaves pending JS exceptions untouched. Remains reusable.
     // Destructor calls clear() and terminates if it fails or throws.
     [[nodiscard]] errors::Error clear();
 

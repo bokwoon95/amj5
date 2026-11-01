@@ -159,9 +159,6 @@ errors::Error Scheduler::cleanup(int64_t cleanupID) {
     } catch (...) {
         error = errors::message("Cleanup threw an unknown C++ exception");
     }
-    if (JS_HasException(jsContext)) {
-        error.errorCode = ErrorCode::JSException;
-    }
     return error;
 }
 
@@ -237,7 +234,6 @@ errors::Error Scheduler::clear() {
     if (this_thread::get_id() != ownerThreadID) {
         return errors::message("Clear requires the owner thread");
     }
-    std::map<int64_t, std::function<errors::Error()>> pendingCallbackMap;
     std::map<int64_t, std::function<errors::Error()>> pendingCleanupMap;
     {
         const std::lock_guard<std::mutex> lock(mutex);
@@ -245,55 +241,29 @@ errors::Error Scheduler::clear() {
             return {};
         }
         clearing = true;
-        pendingCallbackMap.swap(callbackMap);
-        pendingCleanupMap.swap(cleanupMap);
+        callbackMap.clear();
         triggerTimeMap.clear();
         readyTimeMap.clear();
+        pendingCleanupMap.swap(cleanupMap);
     }
     errors::Error firstError;
-    std::optional<JSValue> firstJSException;
-    // Preserve an exception already pending on entry while allowing cleanups to
-    // call QuickJS with no exception pending.
-    if (JS_HasException(jsContext)) {
-        firstJSException = JS_GetException(jsContext);
-        firstError = errors::Error{
-            .errorCode = ErrorCode::JSException,
-            .errorMessage = "JavaScript exception was pending before clear()",
-        };
-    }
-    for (const std::pair<const int64_t, std::function<errors::Error()>>& pending : pendingCleanupMap) {
+    for (const std::pair<const int64_t, std::function<errors::Error()>>& entry : pendingCleanupMap) {
         errors::Error error;
         try {
-            error = pending.second();
+            error = entry.second();
         } catch (const std::exception& exception) {
             error = errors::message(std::string("Cleanup threw a C++ exception: ") + exception.what());
         } catch (...) {
             error = errors::message("Cleanup threw an unknown C++ exception");
         }
-        if (JS_HasException(jsContext)) {
-            const JSValue exception = JS_GetException(jsContext);
-            error.errorCode = ErrorCode::JSException;
-            if (error.errorMessage.empty()) {
-                error.errorMessage = "Cleanup left a pending JavaScript exception";
-            }
-            if (!firstError.errorCode) {
-                firstJSException = exception;
-            } else {
-                JS_FreeValue(jsContext, exception);
-            }
-        }
         if (!firstError.errorCode && error.errorCode) {
             firstError = error;
         }
     }
-    pendingCallbackMap.clear();
     pendingCleanupMap.clear();
     {
         const std::lock_guard<std::mutex> lock(mutex);
         clearing = false;
-    }
-    if (firstJSException.has_value()) {
-        JS_Throw(jsContext, firstJSException.value());
     }
     return firstError;
 }
