@@ -22,9 +22,9 @@ enum class ErrorCode : std::uint8_t {
 // categories; detail may hold any copyable module-specific error struct.
 // Treat published errors and their cause chains as immutable and acyclic.
 struct Error {
-    std::error_code errorCode = std::error_code();
+    std::error_code errorCode = {};
     std::string errorMessage = "";
-    std::any detail = std::any();
+    std::any detail = {};
     std::shared_ptr<const Error> cause = nullptr;
 
     // (file, line, description); empty unless explicitly captured.

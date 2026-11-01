@@ -32,10 +32,10 @@ enum class ErrorCode : std::uint8_t {
 // mutex. Workers need checked access (e.g. weak_ptr); the final owner must release
 // the scheduler on its constructing thread. The borrowed context must outlive it.
 //
-// A returned JSException means JS_GetException(context) retrieves the pending JS
-// exception. Other failures do not promise an associated JS exception. Supplied
-// functions return zero-code Error for success; pending JS exceptions are also
-// detected. Unexpected C++ exceptions from supplied functions become GenericError.
+// Supplied functions return zero-code Error for success. Pending JS exceptions
+// after supplied functions execute are reported as JSException. Error codes
+// returned by supplied functions are not validated against the JS exception state.
+// Unexpected C++ exceptions from supplied functions become GenericError.
 // Allocation/synchronization failures in scheduler operations may still throw.
 class Scheduler {
   public:

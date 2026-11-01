@@ -170,12 +170,7 @@ errors::Error Scheduler::runNext() {
     if (JS_HasException(jsContext)) {
         return errors::message("cannot run next callback with a pending JavaScript exception");
     }
-    struct Record {
-        int64_t callbackID = 0;
-        std::function<errors::Error()> callback = {};
-        chrono::steady_clock::time_point readyTime = {};
-    };
-    Record record;
+    std::function<errors::Error()> callback = {};
     {
         std::unique_lock<std::mutex> lock(mutex);
         while (true) {
@@ -185,56 +180,43 @@ errors::Error Scheduler::runNext() {
                     .errorMessage = "No scheduled callback can make progress; invocation is stalled",
                 };
             }
-            const chrono::steady_clock::time_point now = chrono::steady_clock::now();
-            std::optional<chrono::steady_clock::time_point> nearestDeadline;
-            std::optional<Record> record;
+            int64_t callbackID = 0;
+            std::optional<chrono::steady_clock::time_point> timePoint = {};
             for (const std::pair<const int64_t, std::function<errors::Error()>>& entry : callbackMap) {
-                const int64_t callbackID = entry.first;
-                const std::function<errors::Error()> callback = entry.second;
-                std::optional<chrono::steady_clock::time_point> readyTime;
-                if (readyTimeMap.contains(callbackID)) {
-                    readyTime = readyTimeMap.at(callbackID);
-                }
-                if (triggerTimeMap.contains(callbackID)) {
-                    const chrono::steady_clock::time_point deadline = triggerTimeMap.at(callbackID);
-                    if (!nearestDeadline.has_value() || deadline < nearestDeadline.value()) {
-                        nearestDeadline = deadline;
-                    }
-                    if (deadline <= now && (!readyTime.has_value() || deadline < readyTime.value())) {
-                        readyTime = deadline;
+                // Check the readyTimeMap.
+                if (readyTimeMap.contains(entry.first)) {
+                    const chrono::steady_clock::time_point readyTime = readyTimeMap.at(entry.first);
+                    if (!timePoint.has_value() || readyTime < timePoint.value()) {
+                        callbackID = entry.first;
+                        timePoint = readyTime;
                     }
                 }
-                if (!readyTime.has_value()) {
-                    continue;
-                }
-                if (!record.has_value() || readyTime.value() < record.value().readyTime ||
-                    (readyTime.value() == record.value().readyTime && callbackID < record.value().callbackID)) {
-                    record = Record{
-                        .callbackID = callbackID,
-                        .readyTime = readyTime.value(),
-                    };
+                // Check the triggerTimeMap.
+                if (triggerTimeMap.contains(entry.first)) {
+                    const chrono::steady_clock::time_point triggerTime = triggerTimeMap.at(entry.first);
+                    if (!timePoint.has_value() || triggerTime < timePoint.value()) {
+                        callbackID = entry.first;
+                        timePoint = triggerTime;
+                    }
                 }
             }
-            if (record.has_value()) {
-                record = record.value();
-                record.callback = callbackMap.at(record.callbackID);
-                callbackMap.erase(record.callbackID);
-                triggerTimeMap.erase(record.callbackID);
-                readyTimeMap.erase(record.callbackID);
-                break;
-            }
-            // Recheck after notification, timeout, or spurious wakeup. The shared
-            // mutex prevents a lost check-to-sleep notification.
-            if (nearestDeadline.has_value()) {
-                conditionVariable.wait_until(lock, nearestDeadline.value());
+            if (timePoint.has_value()) {
+                if (timePoint.value() <= chrono::steady_clock::now()) {
+                    callback = callbackMap.at(callbackID);
+                    callbackMap.erase(callbackID);
+                    triggerTimeMap.erase(callbackID);
+                    readyTimeMap.erase(callbackID);
+                    break;
+                }
+                conditionVariable.wait_until(lock, timePoint.value());
             } else {
                 conditionVariable.wait(lock);
             }
         }
     }
-    errors::Error error;
+    errors::Error error = {};
     try {
-        error = record.callback();
+        error = callback();
     } catch (const std::exception& exception) {
         error = errors::message(std::string("Callback threw a C++ exception: ") + exception.what());
     } catch (...) {
@@ -294,9 +276,6 @@ errors::Error Scheduler::clear() {
             } else {
                 JS_FreeValue(jsContext, exception);
             }
-        } else if (error.errorCode == ErrorCode::JSException) {
-            error.errorCode = errors::ErrorCode::GenericError;
-            error.errorMessage = "Cleanup returned JSException without a pending JavaScript exception";
         }
         if (!firstError.errorCode && error.errorCode) {
             firstError = error;
