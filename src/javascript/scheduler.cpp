@@ -73,13 +73,13 @@ std::expected<int64_t, errors::Error> Scheduler::registerCallback(std::function<
     if (this_thread::get_id() != ownerThreadID) {
         return std::unexpected(errors::message("called registerCallback() outside owner thread"));
     }
+    const std::lock_guard<std::mutex> lock(mutex);
     if (clearing) {
         return std::unexpected(errors::message("called registerCallback() inside a clear()"));
     }
     if (callback == nullptr) {
         return std::unexpected(errors::message("registered a nullptr callback function"));
     }
-    const std::lock_guard<std::mutex> lock(mutex);
     if (callbackIDCounter >= std::numeric_limits<int64_t>::max()) {
         return std::unexpected(errors::message("callbackIDs exhausted"));
     }
@@ -122,6 +122,7 @@ std::expected<int64_t, errors::Error> Scheduler::registerCleanup(std::function<e
     if (this_thread::get_id() != ownerThreadID) {
         return std::unexpected(errors::message("called registerCleanup() outside owner thread"));
     }
+    const std::lock_guard<std::mutex> lock(mutex);
     if (clearing) {
         return std::unexpected(errors::message("called registerCleanup() inside a clear()"));
     }
@@ -141,11 +142,15 @@ errors::Error Scheduler::cleanup(int64_t cleanupID) {
     if (this_thread::get_id() != ownerThreadID) {
         return errors::message("called cleanup() outside owner thread");
     }
-    if (!cleanupMap.contains(cleanupID)) {
-        return {};
+    std::function<errors::Error()> cleanup = {};
+    {
+        const std::lock_guard<std::mutex> lock(mutex);
+        if (!cleanupMap.contains(cleanupID)) {
+            return {};
+        }
+        cleanup = cleanupMap.at(cleanupID);
+        cleanupMap.erase(cleanupID);
     }
-    const std::function<errors::Error()> cleanup = cleanupMap.at(cleanupID);
-    cleanupMap.erase(cleanupID);
     errors::Error error;
     try {
         error = cleanup();
@@ -164,15 +169,15 @@ errors::Error Scheduler::runNext() {
     if (this_thread::get_id() != ownerThreadID) {
         return errors::message("called runNext() outside owner thread");
     }
-    if (clearing) {
-        return errors::message("called runNext() inside a clear()");
-    }
-    if (JS_HasException(jsContext)) {
-        return errors::message("cannot run next callback with a pending JavaScript exception");
-    }
     std::function<errors::Error()> callback = {};
     {
         std::unique_lock<std::mutex> lock(mutex);
+        if (clearing) {
+            return errors::message("called runNext() inside a clear()");
+        }
+        if (JS_HasException(jsContext)) {
+            return errors::message("cannot run next callback with a pending JavaScript exception");
+        }
         while (true) {
             if (callbackMap.empty()) {
                 return errors::Error{
@@ -232,14 +237,14 @@ errors::Error Scheduler::clear() {
     if (this_thread::get_id() != ownerThreadID) {
         return errors::message("Clear requires the owner thread");
     }
-    if (clearing) {
-        return {};
-    }
-    clearing = true;
     std::map<int64_t, std::function<errors::Error()>> pendingCallbacks;
     std::map<int64_t, std::function<errors::Error()>> pendingCleanups;
     {
         const std::lock_guard<std::mutex> lock(mutex);
+        if (clearing) {
+            return {};
+        }
+        clearing = true;
         pendingCallbacks.swap(callbackMap);
         pendingCleanups.swap(cleanupMap);
         triggerTimeMap.clear();
@@ -283,7 +288,10 @@ errors::Error Scheduler::clear() {
     }
     pendingCallbacks.clear();
     pendingCleanups.clear();
-    clearing = false;
+    {
+        const std::lock_guard<std::mutex> lock(mutex);
+        clearing = false;
+    }
     if (firstJSException.has_value()) {
         JS_Throw(jsContext, firstJSException.value());
     }

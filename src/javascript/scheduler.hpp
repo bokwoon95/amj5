@@ -79,9 +79,10 @@ class Scheduler {
   private:
     JSContext* jsContext = nullptr;
     std::thread::id ownerThreadID = {};
-    std::mutex mutex = {};
     std::condition_variable conditionVariable = {};
-    // The mutex protects callback/deadline/readiness maps shared with markReady().
+    // The mutex protects all fields below it. Callbacks and cleanups execute
+    // outside the lock. Fields above it are construction-only or self-synchronized.
+    std::mutex mutex = {};
     std::map<int64_t, std::function<errors::Error()>> callbackMap = {};
     std::map<int64_t, chrono::steady_clock::time_point> triggerTimeMap = {};
     std::map<int64_t, chrono::steady_clock::time_point> readyTimeMap = {};
