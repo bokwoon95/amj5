@@ -125,10 +125,7 @@ export class Headers {
       for (const pair of /**
        * @type {Iterable<unknown>}
        */ (init)) {
-        if (
-          pair === null ||
-          (typeof pair !== "object" && typeof pair !== "function")
-        ) {
+        if (pair === null || (typeof pair !== "object" && typeof pair !== "function")) {
           throw new TypeError("Headers require name/value pairs");
         }
         const fields = Array.from(
@@ -694,10 +691,7 @@ export async function fetch(input, init) {
     }
     method = String(init.method).toUpperCase();
   }
-  if (
-    !/^[!#$%&'*+.^_`|~0-9A-Z-]+$/.test(method) ||
-    ["CONNECT", "TRACE", "TRACK"].includes(method)
-  ) {
+  if (!/^[!#$%&'*+.^_`|~0-9A-Z-]+$/.test(method) || ["CONNECT", "TRACE", "TRACK"].includes(method)) {
     throw new TypeError("Invalid HTTP method");
   }
   if (init.redirect !== undefined && init.redirect !== "error") {
@@ -757,12 +751,8 @@ export async function fetch(input, init) {
     const metadata = await new Promise((resolve, reject) => {
       state.headers = { resolve, reject };
       try {
-        state.request = fetchImpl.start(
-          url.href,
-          method,
-          Array.from(headers),
-          body,
-          (failure, metadata) => state.receiveHeaders(failure, metadata),
+        state.request = fetchImpl.start(url.href, method, Array.from(headers), body, (failure, metadata) =>
+          state.receiveHeaders(failure, metadata),
         );
         state.attachSignal(signal);
       } catch (error) {

@@ -6,15 +6,15 @@ The host chooses which target receives those exports.
 
 ## Modules and native/JS boundary
 
-| Module name | Implementation | Exports |
-| --- | --- | --- |
-| `amj:text` | `text.js` | `TextEncoder`, `TextDecoder` |
-| `amj:url_impl` | `url_impl.hpp/.cpp` | `urlImpl` |
-| `amj:url` | `url.js` | `URL`, `URLSearchParams` |
-| `amj:timeout_impl` | `timeout_impl.hpp/.cpp` | `timeoutImpl` |
-| `amj:timeout` | `timeout.js` | `setTimeout`, `clearTimeout` |
-| `amj:fetch_impl` | `fetch_impl.hpp/.cpp` | `fetchImpl` |
-| `amj:fetch` | `fetch.js` | `Headers`, `fetch` |
+| Module name        | Implementation          | Exports                      |
+| ------------------ | ----------------------- | ---------------------------- |
+| `amj:text`         | `text.js`               | `TextEncoder`, `TextDecoder` |
+| `amj:url_impl`     | `url_impl.hpp/.cpp`     | `urlImpl`                    |
+| `amj:url`          | `url.js`                | `URL`, `URLSearchParams`     |
+| `amj:timeout_impl` | `timeout_impl.hpp/.cpp` | `timeoutImpl`                |
+| `amj:timeout`      | `timeout.js`            | `setTimeout`, `clearTimeout` |
+| `amj:fetch_impl`   | `fetch_impl.hpp/.cpp`   | `fetchImpl`                  |
+| `amj:fetch`        | `fetch.js`              | `Headers`, `fetch`           |
 
 `URLImpl::createModule(jsContext)` registers `amj:url_impl`. Its stateless Ada
 operations are `parse`, `set`, `parseQuery`, and `serializeQuery`. `url.js` imports

@@ -90,10 +90,7 @@ export class URLSearchParams {
             if (pairs.length >= pairLimit) {
               throw new RangeError("URL query exceeds 65536 pairs");
             }
-            if (
-              pair === null ||
-              (typeof pair !== "object" && typeof pair !== "function")
-            ) {
+            if (pair === null || (typeof pair !== "object" && typeof pair !== "function")) {
               throw new TypeError("Expected iterable name/value pairs");
             }
             /**
@@ -110,11 +107,7 @@ export class URLSearchParams {
               fields.push(scalarString(field));
             }
             const [name, value] = fields;
-            if (
-              fields.length !== 2 ||
-              name === undefined ||
-              value === undefined
-            ) {
+            if (fields.length !== 2 || name === undefined || value === undefined) {
               throw new TypeError("Expected exactly two fields per pair");
             }
             bytes += byteLength(name) + byteLength(value);
@@ -188,11 +181,7 @@ export class URLSearchParams {
     if (matchValue) {
       value = scalarString(value);
     }
-    this.#commit(
-      this.#state.pairs.filter(
-        (pair) => pair[0] !== name || (matchValue && pair[1] !== value),
-      ),
-    );
+    this.#commit(this.#state.pairs.filter((pair) => pair[0] !== name || (matchValue && pair[1] !== value)));
   }
   /**
    * @param {unknown} name
@@ -241,9 +230,7 @@ export class URLSearchParams {
     if (matchValue) {
       value = scalarString(value);
     }
-    return this.#state.pairs.some(
-      (pair) => pair[0] === name && (!matchValue || pair[1] === value),
-    );
+    return this.#state.pairs.some((pair) => pair[0] === name && (!matchValue || pair[1] === value));
   }
   /**
    * @param {unknown} name

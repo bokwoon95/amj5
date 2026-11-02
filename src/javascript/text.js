@@ -77,20 +77,16 @@ export class TextDecoder {
   #lower = 0x80;
   #upper = 0xbf;
   #bomSeen = false;
+
   /**
    * @param {unknown} [label]
-   * @param {{fatal?: unknown, ignoreBOM?: unknown} | null} [options]
+   * @param {{fatal?: unknown, ignoreBOM?: unknown} | null } [options]
    */
   constructor(label, options) {
     if (typeof label === "symbol") {
       throw new TypeError("Decoder label cannot be a Symbol");
     }
-    if (
-      label !== undefined &&
-      !["utf-8", "utf8", "unicode-1-1-utf-8"].includes(
-        String(label).trim().toLowerCase(),
-      )
-    ) {
+    if (label !== undefined && !["utf-8", "utf8", "unicode-1-1-utf-8"].includes(String(label).trim().toLowerCase())) {
       throw new RangeError("Only UTF-8 decoding is supported");
     }
     if (options !== undefined && options !== null) {
@@ -98,27 +94,28 @@ export class TextDecoder {
       this.#ignoreBOM = Boolean(options.ignoreBOM);
     }
   }
+
   /**
    * @returns {"utf-8"}
    */
   get encoding() {
     return "utf-8";
   }
+
   get fatal() {
     return this.#fatal;
   }
+
   get ignoreBOM() {
     return this.#ignoreBOM;
   }
+
   /**
    * @param {ArrayBuffer | ArrayBufferView} [input]
    * @param {{stream?: unknown} | null} [options]
    * @returns {string}
    */
   decode(input, options) {
-    /**
-     * @type {Uint8Array}
-     */
     let bytes = new Uint8Array(0);
     if (input instanceof ArrayBuffer) {
       bytes = new Uint8Array(input);
@@ -128,10 +125,12 @@ export class TextDecoder {
       }
       bytes = new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
     }
+
     /**
      * @type {string[]}
      */
     const characters = [];
+
     /**
      * @param {number} point
      * @returns {void}
@@ -145,6 +144,7 @@ export class TextDecoder {
       }
       characters.push(String.fromCodePoint(point));
     };
+
     const invalid = () => {
       this.#needed = 0;
       this.#seen = 0;
@@ -157,6 +157,7 @@ export class TextDecoder {
       }
       emit(0xfffd);
     };
+
     for (let index = 0; index < bytes.length; index++) {
       const byte = bytes[index];
       if (byte === undefined) {
