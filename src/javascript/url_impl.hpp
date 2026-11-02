@@ -2,39 +2,7 @@
 
 #include <quickjs.h>
 
-#include <cstdint>
-#include <string>
-
 namespace amj::javascript {
-
-// Component strings accepted by set(), represented as an enum inside C++.
-enum class URLComponent : std::uint8_t {
-    Href,
-    Protocol,
-    Username,
-    Password,
-    Host,
-    Hostname,
-    Port,
-    Pathname,
-    Search,
-    Hash,
-};
-
-// Plain snapshot converted to a JS object with these same string fields.
-struct URLParts {
-    std::string href = "";
-    std::string origin = "";
-    std::string protocol = "";
-    std::string username = "";
-    std::string password = "";
-    std::string host = "";
-    std::string hostname = "";
-    std::string port = "";
-    std::string pathname = "";
-    std::string search = "";
-    std::string hash = "";
-};
 
 // Stateless Ada operations used by url.js. These methods accept already-coerced
 // scalar-value strings: JS owns constructors, argument coercion, URLSearchParams
@@ -45,11 +13,11 @@ struct URLParts {
 class URLImpl {
   public:
     // input: string; baseOrNull: string or null. Invalid URLs/bases return null.
-    // Otherwise returns URLParts as a plain JS object.
+    // Otherwise returns a plain JS object matching URLParts in url_impl.d.ts.
     // search/hash include their leading ?/# when present.
     static JSValue parse(JSContext* jsContext, JSValueConst input, JSValueConst baseOrNull);
 
-    // href/component/value: strings. component is a URLComponent string:
+    // href/component/value: strings. component is one of:
     // href, protocol, username, password, host, hostname, port, pathname, search, hash.
     // Returns an updated snapshot with the same shape as parse(), or null if
     // Ada rejects the URL/change. JS decides whether rejection throws or is ignored.

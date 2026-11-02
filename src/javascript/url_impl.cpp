@@ -25,7 +25,7 @@ namespace {
 constexpr std::size_t inputLimit = 1048576;
 constexpr int64_t pairLimit = 65536;
 
-JSValue snapshot(JSContext* jsContext, const ada::url_aggregator& url) {
+JSValue urlToJSObject(JSContext* jsContext, const ada::url_aggregator& url) {
     if (url.get_href().size() > inputLimit) {
         return JS_ThrowRangeError(jsContext, "Normalized URL exceeds 1 MiB");
     }
@@ -33,45 +33,44 @@ JSValue snapshot(JSContext* jsContext, const ada::url_aggregator& url) {
     if (std::count(search.begin(), search.end(), '&') >= pairLimit) {
         return JS_ThrowRangeError(jsContext, "URL query exceeds 65536 pairs");
     }
-    const URLParts parts = {
-        .href = std::string(url.get_href()),
-        .origin = url.get_origin(),
-        .protocol = std::string(url.get_protocol()),
-        .username = std::string(url.get_username()),
-        .password = std::string(url.get_password()),
-        .host = std::string(url.get_host()),
-        .hostname = std::string(url.get_hostname()),
-        .port = std::string(url.get_port()),
-        .pathname = std::string(url.get_pathname()),
-        .search = std::string(search),
-        .hash = std::string(url.get_hash()),
-    };
-    const AutoJSValue result(jsContext, JS_NewObjectProto(jsContext, JS_NULL));
-    if (JS_IsException(result.value)) {
+    AutoJSValue obj(jsContext, JS_NewObjectProto(jsContext, JS_NULL));
+    if (JS_IsException(obj.value)) {
         return JS_EXCEPTION;
     }
-    const std::array<std::pair<const char*, std::string_view>, 11> fields = {
-        {
-            {"href", parts.href},
-            {"origin", parts.origin},
-            {"protocol", parts.protocol},
-            {"username", parts.username},
-            {"password", parts.password},
-            {"host", parts.host},
-            {"hostname", parts.hostname},
-            {"port", parts.port},
-            {"pathname", parts.pathname},
-            {"search", parts.search},
-            {"hash", parts.hash},
-        },
-    };
-    for (const std::pair<const char*, std::string_view>& field : fields) {
-        const JSValue text = JS_NewStringLen(jsContext, field.second.data(), field.second.size());
-        if (JS_IsException(text) || JS_DefinePropertyValueStr(jsContext, result.value, field.first, text, JS_PROP_C_W_E) < 0) {
-            return JS_EXCEPTION;
-        }
+    if (!setJSStringField(obj, "href", url.get_href())) {
+        return JS_EXCEPTION;
     }
-    return JS_DupValue(jsContext, result.value);
+    if (!setJSStringField(obj, "origin", url.get_origin())) {
+        return JS_EXCEPTION;
+    }
+    if (!setJSStringField(obj, "protocol", url.get_protocol())) {
+        return JS_EXCEPTION;
+    }
+    if (!setJSStringField(obj, "username", url.get_username())) {
+        return JS_EXCEPTION;
+    }
+    if (!setJSStringField(obj, "password", url.get_password())) {
+        return JS_EXCEPTION;
+    }
+    if (!setJSStringField(obj, "host", url.get_host())) {
+        return JS_EXCEPTION;
+    }
+    if (!setJSStringField(obj, "hostname", url.get_hostname())) {
+        return JS_EXCEPTION;
+    }
+    if (!setJSStringField(obj, "port", url.get_port())) {
+        return JS_EXCEPTION;
+    }
+    if (!setJSStringField(obj, "pathname", url.get_pathname())) {
+        return JS_EXCEPTION;
+    }
+    if (!setJSStringField(obj, "search", url.get_search())) {
+        return JS_EXCEPTION;
+    }
+    if (!setJSStringField(obj, "hash", url.get_hash())) {
+        return JS_EXCEPTION;
+    }
+    return obj.release();
 }
 
 JSValue urlOperation(JSContext* jsContext, JSValueConst /* thisValue */, int argc, JSValueConst* argv, int operation) {
@@ -96,7 +95,7 @@ JSValue URLImpl::parse(JSContext* jsContext, JSValueConst input, JSValueConst ba
     if (!JS_IsString(input)) {
         return JS_ThrowTypeError(jsContext, "URLImpl.parse: argument 'input' must be a string");
     }
-    const std::optional<std::string> inputText = convertToString(jsContext, input);
+    const std::optional<std::string> inputText = jsValueToString(jsContext, input);
     if (!inputText.has_value()) {
         return JS_EXCEPTION;
     }
@@ -110,7 +109,7 @@ JSValue URLImpl::parse(JSContext* jsContext, JSValueConst input, JSValueConst ba
         if (!JS_IsString(baseOrNull)) {
             return JS_ThrowTypeError(jsContext, "URLImpl.parse: argument 'baseOrNull' must be a string or null");
         }
-        const std::optional<std::string> baseText = convertToString(jsContext, baseOrNull);
+        const std::optional<std::string> baseText = jsValueToString(jsContext, baseOrNull);
         if (!baseText.has_value()) {
             return JS_EXCEPTION;
         }
@@ -126,7 +125,7 @@ JSValue URLImpl::parse(JSContext* jsContext, JSValueConst input, JSValueConst ba
     if (!parsed.has_value()) {
         return JS_NULL;
     }
-    return snapshot(jsContext, parsed.value());
+    return urlToJSObject(jsContext, parsed.value());
 } catch (const std::bad_alloc&) {
     return JS_ThrowOutOfMemory(jsContext);
 } catch (const std::exception& exception) {
@@ -139,7 +138,7 @@ JSValue URLImpl::set(JSContext* jsContext, JSValueConst href, JSValueConst compo
     if (!JS_IsString(href)) {
         return JS_ThrowTypeError(jsContext, "URLImpl.set: argument 'href' must be a string");
     }
-    const std::optional<std::string> hrefText = convertToString(jsContext, href);
+    const std::optional<std::string> hrefText = jsValueToString(jsContext, href);
     if (!hrefText.has_value()) {
         return JS_EXCEPTION;
     }
@@ -149,7 +148,7 @@ JSValue URLImpl::set(JSContext* jsContext, JSValueConst href, JSValueConst compo
     if (!JS_IsString(component)) {
         return JS_ThrowTypeError(jsContext, "URLImpl.set: argument 'component' must be a string");
     }
-    const std::optional<std::string> componentText = convertToString(jsContext, component);
+    const std::optional<std::string> componentText = jsValueToString(jsContext, component);
     if (!componentText.has_value()) {
         return JS_EXCEPTION;
     }
@@ -159,7 +158,7 @@ JSValue URLImpl::set(JSContext* jsContext, JSValueConst href, JSValueConst compo
     if (!JS_IsString(value)) {
         return JS_ThrowTypeError(jsContext, "URLImpl.set: argument 'value' must be a string");
     }
-    const std::optional<std::string> valueText = convertToString(jsContext, value);
+    const std::optional<std::string> valueText = jsValueToString(jsContext, value);
     if (!valueText.has_value()) {
         return JS_EXCEPTION;
     }
@@ -171,55 +170,34 @@ JSValue URLImpl::set(JSContext* jsContext, JSValueConst href, JSValueConst compo
         return JS_NULL;
     }
     ada::url_aggregator& url = parsed.value();
-    const std::array<std::pair<std::string_view, URLComponent>, 10> components = {
-        {{"href", URLComponent::Href}, {"protocol", URLComponent::Protocol}, {"username", URLComponent::Username}, {"password", URLComponent::Password}, {"host", URLComponent::Host}, {"hostname", URLComponent::Hostname}, {"port", URLComponent::Port}, {"pathname", URLComponent::Pathname}, {"search", URLComponent::Search}, {"hash", URLComponent::Hash}}};
-    std::optional<URLComponent> urlComponent;
-    for (const std::pair<std::string_view, URLComponent>& entry : components) {
-        if (entry.first == componentText.value()) {
-            urlComponent = entry.second;
-            break;
-        }
-    }
-    if (!urlComponent.has_value()) {
-        return JS_ThrowTypeError(jsContext, "Unknown URL component");
-    }
     bool accepted = true;
-    switch (urlComponent.value()) {
-        case URLComponent::Href:
-            accepted = url.set_href(valueText.value());
-            break;
-        case URLComponent::Protocol:
-            accepted = url.set_protocol(valueText.value());
-            break;
-        case URLComponent::Username:
-            accepted = url.set_username(valueText.value());
-            break;
-        case URLComponent::Password:
-            accepted = url.set_password(valueText.value());
-            break;
-        case URLComponent::Host:
-            accepted = url.set_host(valueText.value());
-            break;
-        case URLComponent::Hostname:
-            accepted = url.set_hostname(valueText.value());
-            break;
-        case URLComponent::Port:
-            accepted = url.set_port(valueText.value());
-            break;
-        case URLComponent::Pathname:
-            accepted = url.set_pathname(valueText.value());
-            break;
-        case URLComponent::Search:
-            url.set_search(valueText.value());
-            break;
-        case URLComponent::Hash:
-            url.set_hash(valueText.value());
-            break;
+    if (componentText.value() == "href") {
+        accepted = url.set_href(valueText.value());
+    } else if (componentText.value() == "protocol") {
+        accepted = url.set_protocol(valueText.value());
+    } else if (componentText.value() == "username") {
+        accepted = url.set_username(valueText.value());
+    } else if (componentText.value() == "password") {
+        accepted = url.set_password(valueText.value());
+    } else if (componentText.value() == "host") {
+        accepted = url.set_host(valueText.value());
+    } else if (componentText.value() == "hostname") {
+        accepted = url.set_hostname(valueText.value());
+    } else if (componentText.value() == "port") {
+        accepted = url.set_port(valueText.value());
+    } else if (componentText.value() == "pathname") {
+        accepted = url.set_pathname(valueText.value());
+    } else if (componentText.value() == "search") {
+        url.set_search(valueText.value());
+    } else if (componentText.value() == "hash") {
+        url.set_hash(valueText.value());
+    } else {
+        return JS_ThrowTypeError(jsContext, "Unknown URL component");
     }
     if (!accepted) {
         return JS_NULL;
     }
-    return snapshot(jsContext, url);
+    return urlToJSObject(jsContext, url);
 } catch (const std::bad_alloc&) {
     return JS_ThrowOutOfMemory(jsContext);
 } catch (const std::exception& exception) {
@@ -232,7 +210,7 @@ JSValue URLImpl::parseQuery(JSContext* jsContext, JSValueConst query) try {
     if (!JS_IsString(query)) {
         return JS_ThrowTypeError(jsContext, "URLImpl.parseQuery: argument 'query' must be a string");
     }
-    const std::optional<std::string> text = convertToString(jsContext, query);
+    const std::optional<std::string> text = jsValueToString(jsContext, query);
     if (!text.has_value()) {
         return JS_EXCEPTION;
     }
@@ -308,7 +286,7 @@ JSValue URLImpl::serializeQuery(JSContext* jsContext, JSValueConst pairs) try {
         if (!JS_IsString(name.value)) {
             return JS_ThrowTypeError(jsContext, "URLImpl.serializeQuery: pair name must be a string");
         }
-        const std::optional<std::string> nameText = convertToString(jsContext, name.value);
+        const std::optional<std::string> nameText = jsValueToString(jsContext, name.value);
         if (!nameText.has_value()) {
             return JS_EXCEPTION;
         }
@@ -318,7 +296,7 @@ JSValue URLImpl::serializeQuery(JSContext* jsContext, JSValueConst pairs) try {
         if (!JS_IsString(value.value)) {
             return JS_ThrowTypeError(jsContext, "URLImpl.serializeQuery: pair value must be a string");
         }
-        const std::optional<std::string> valueText = convertToString(jsContext, value.value);
+        const std::optional<std::string> valueText = jsValueToString(jsContext, value.value);
         if (!valueText.has_value()) {
             return JS_EXCEPTION;
         }

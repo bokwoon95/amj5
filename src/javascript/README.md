@@ -60,10 +60,12 @@ CMake copies the JS facades, `*_impl.d.ts`, and `global.d.ts` into the build's
 ## Types and dependency direction
 
 Each `*_impl.d.ts` describes only its C++ module's JS contract. It never imports
-the JS facade. The corresponding headers expose boundary-data types:
+the JS facade. C++ headers retain types only when native code uses them:
 
-- Fetch: `FetchFailure`, `FetchResponseMetadata`, and opaque `FetchRequestHandle`.
-- URL: `URLParts` and `URLComponent` (a C++ enum, represented by strings in JS).
+- Fetch: `FetchFailure` and `FetchResponseMetadata` hold native completion data.
+  `FetchRequestHandle` is a TypeScript-only description of an opaque JS handle.
+- URL: `URLParts` and `URLComponent` are TypeScript-only types. Native code
+  constructs JS objects directly from Ada URLs and accepts component strings.
 
 C++ uses standard pairs/vectors; JS uses inline `[string, string]` tuple/array
 types rather than pair aliases. Internal `FetchImplState`, `FetchRequestState`,

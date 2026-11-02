@@ -4,6 +4,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace amj::javascript {
@@ -31,6 +32,10 @@ class AutoJSValue {
 
 // Converts to UTF-8 without type validation or size limits. Returns nullopt on
 // failure with a pending JS exception. Check JS_IsString() first if coercion is unwanted.
-std::optional<std::string> convertToString(JSContext* jsContext, JSValueConst value);
+std::optional<std::string> jsValueToString(JSContext* jsContext, JSValueConst value);
+
+// Defines an own, writable/enumerable/configurable string property.
+// Returns false with a pending JS exception on failure.
+bool setJSStringField(const AutoJSValue& obj, const char* key, std::string_view value);
 
 } // namespace amj::javascript

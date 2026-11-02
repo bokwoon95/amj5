@@ -12,9 +12,6 @@ namespace amj::javascript {
 class Scheduler;
 struct FetchImplState;
 
-// Opaque JS request object returned by start(); its ownership stays in the .cpp.
-struct FetchRequestHandle;
-
 // Plain completion data, converted to JS objects with the same field names.
 struct FetchFailure {
     std::string type = "";
@@ -34,7 +31,8 @@ class FetchImpl {
   public:
     // url/method: normalized strings; headerPairs: array of two-string arrays;
     // bytes: Uint8Array; onHeaders: function(failureOrNull, metadataOrNull).
-    // Returns an opaque FetchRequestHandle JS object, or JS_EXCEPTION on synchronous failure.
+    // Returns an opaque JS request handle (FetchRequestHandle in fetch_impl.d.ts),
+    // or JS_EXCEPTION on synchronous failure.
     // Later invokes onHeaders once through the scheduler with FetchFailure/null and
     // FetchResponseMetadata/null. Header pairs become two-element JS arrays.
     // No native Promise or JS Error is created. 4xx/5xx are successful responses.
