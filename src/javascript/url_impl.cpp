@@ -21,18 +21,13 @@
 namespace amj::javascript {
 namespace {
 
-// NOLINTBEGIN(bugprone-throwing-static-initialization): JS_MKVAL only constructs scalars.
-const JSValue undefinedValue = JS_UNDEFINED;
-const JSValue nullValue = JS_NULL;
-const JSValue exceptionValue = JS_EXCEPTION;
-// NOLINTEND(bugprone-throwing-static-initialization)
 constexpr std::size_t inputLimit = 1048576;
 constexpr int64_t pairLimit = 65536;
 
 class JSValueOwner {
   public:
     JSContext* jsContext = nullptr;
-    JSValue value = undefinedValue;
+    JSValue value = JS_UNDEFINED;
     JSValueOwner(JSContext* jsContext, JSValue value) {
         this->jsContext = jsContext;
         this->value = value;
@@ -43,7 +38,7 @@ class JSValueOwner {
     JSValueOwner(const JSValueOwner&) = delete;
     JSValueOwner& operator=(const JSValueOwner&) = delete;
     JSValue release() {
-        return std::exchange(value, undefinedValue);
+        return std::exchange(value, JS_UNDEFINED);
     }
 };
 
@@ -91,14 +86,14 @@ JSValue snapshot(JSContext* jsContext, const ada::url_aggregator& url) {
     };
     const std::array<std::pair<const char*, std::string_view>, 11> fields = {
         {{"href", parts.href}, {"origin", parts.origin}, {"protocol", parts.protocol}, {"username", parts.username}, {"password", parts.password}, {"host", parts.host}, {"hostname", parts.hostname}, {"port", parts.port}, {"pathname", parts.pathname}, {"search", parts.search}, {"hash", parts.hash}}};
-    const JSValueOwner result(jsContext, JS_NewObjectProto(jsContext, nullValue));
+    const JSValueOwner result(jsContext, JS_NewObjectProto(jsContext, JS_NULL));
     if (JS_IsException(result.value)) {
-        return exceptionValue;
+        return JS_EXCEPTION;
     }
     for (const std::pair<const char*, std::string_view>& field : fields) {
         const JSValue text = JS_NewStringLen(jsContext, field.second.data(), field.second.size());
         if (JS_IsException(text) || JS_DefinePropertyValueStr(jsContext, result.value, field.first, text, JS_PROP_C_W_E) < 0) {
-            return exceptionValue;
+            return JS_EXCEPTION;
         }
     }
     return JS_DupValue(jsContext, result.value);
@@ -125,7 +120,7 @@ JSValue urlOperation(JSContext* jsContext, JSValueConst /* thisValue */, int arg
 JSValue URLImpl::parse(JSContext* jsContext, JSValueConst input, JSValueConst baseOrNull) try {
     const std::optional<std::string> inputText = readString(jsContext, input);
     if (!inputText.has_value()) {
-        return exceptionValue;
+        return JS_EXCEPTION;
     }
     ada::result<ada::url_aggregator> parsed;
     if (JS_IsNull(baseOrNull)) {
@@ -133,16 +128,16 @@ JSValue URLImpl::parse(JSContext* jsContext, JSValueConst input, JSValueConst ba
     } else {
         const std::optional<std::string> baseText = readString(jsContext, baseOrNull);
         if (!baseText.has_value()) {
-            return exceptionValue;
+            return JS_EXCEPTION;
         }
         const ada::result<ada::url_aggregator> base = ada::parse<ada::url_aggregator>(baseText.value(), nullptr);
         if (!base.has_value()) {
-            return nullValue;
+            return JS_NULL;
         }
         parsed = ada::parse<ada::url_aggregator>(inputText.value(), &base.value());
     }
     if (!parsed.has_value()) {
-        return nullValue;
+        return JS_NULL;
     }
     return snapshot(jsContext, parsed.value());
 } catch (const std::bad_alloc&) {
@@ -158,11 +153,11 @@ JSValue URLImpl::set(JSContext* jsContext, JSValueConst href, JSValueConst compo
     const std::optional<std::string> componentText = readString(jsContext, component);
     const std::optional<std::string> valueText = readString(jsContext, value);
     if (!hrefText.has_value() || !componentText.has_value() || !valueText.has_value()) {
-        return exceptionValue;
+        return JS_EXCEPTION;
     }
     ada::result<ada::url_aggregator> parsed = ada::parse<ada::url_aggregator>(hrefText.value(), nullptr);
     if (!parsed.has_value()) {
-        return nullValue;
+        return JS_NULL;
     }
     ada::url_aggregator& url = parsed.value();
     const std::array<std::pair<std::string_view, URLComponent>, 10> components = {
@@ -211,7 +206,7 @@ JSValue URLImpl::set(JSContext* jsContext, JSValueConst href, JSValueConst compo
         break;
     }
     if (!accepted) {
-        return nullValue;
+        return JS_NULL;
     }
     return snapshot(jsContext, url);
 } catch (const std::bad_alloc&) {
@@ -225,7 +220,7 @@ JSValue URLImpl::set(JSContext* jsContext, JSValueConst href, JSValueConst compo
 JSValue URLImpl::parseQuery(JSContext* jsContext, JSValueConst query) try {
     const std::optional<std::string> text = readString(jsContext, query);
     if (!text.has_value()) {
-        return exceptionValue;
+        return JS_EXCEPTION;
     }
     if (std::count(text.value().begin(), text.value().end(), '&') >= pairLimit) {
         return JS_ThrowRangeError(jsContext, "URL query exceeds 65536 pairs");
@@ -233,24 +228,24 @@ JSValue URLImpl::parseQuery(JSContext* jsContext, JSValueConst query) try {
     const ada::url_search_params searchParams(text.value());
     JSValueOwner result(jsContext, JS_NewArray(jsContext));
     if (JS_IsException(result.value)) {
-        return exceptionValue;
+        return JS_EXCEPTION;
     }
     uint32_t index = 0;
     for (const std::pair<std::string, std::string>& pair : searchParams) {
         JSValueOwner fields(jsContext, JS_NewArray(jsContext));
         if (JS_IsException(fields.value)) {
-            return exceptionValue;
+            return JS_EXCEPTION;
         }
         const std::array<std::string_view, 2> strings = {pair.first, pair.second};
         for (uint32_t field = 0; field < strings.size(); field++) {
             const std::string_view string = strings.at(field);
             const JSValue value = JS_NewStringLen(jsContext, string.data(), string.size());
             if (JS_IsException(value) || JS_DefinePropertyValueUint32(jsContext, fields.value, field, value, JS_PROP_C_W_E) < 0) {
-                return exceptionValue;
+                return JS_EXCEPTION;
             }
         }
         if (JS_DefinePropertyValueUint32(jsContext, result.value, index, fields.release(), JS_PROP_C_W_E) < 0) {
-            return exceptionValue;
+            return JS_EXCEPTION;
         }
         index++;
     }
@@ -267,7 +262,7 @@ JSValue URLImpl::serializeQuery(JSContext* jsContext, JSValueConst pairs) try {
     int64_t count = 0;
     if (!JS_IsArray(pairs) || JS_GetLength(jsContext, pairs, &count) < 0) {
         if (JS_HasException(jsContext)) {
-            return exceptionValue;
+            return JS_EXCEPTION;
         }
         return JS_ThrowTypeError(jsContext, "Query pairs must be an array");
     }
@@ -280,23 +275,23 @@ JSValue URLImpl::serializeQuery(JSContext* jsContext, JSValueConst pairs) try {
         const JSValueOwner pair(jsContext, JS_GetPropertyUint32(jsContext, pairs, static_cast<uint32_t>(index)));
         int64_t length = 0;
         if (JS_IsException(pair.value)) {
-            return exceptionValue;
+            return JS_EXCEPTION;
         }
         if (!JS_IsArray(pair.value) || JS_GetLength(jsContext, pair.value, &length) < 0 || length != 2) {
             if (JS_HasException(jsContext)) {
-                return exceptionValue;
+                return JS_EXCEPTION;
             }
             return JS_ThrowTypeError(jsContext, "Expected two-string query pairs");
         }
         const JSValueOwner name(jsContext, JS_GetPropertyUint32(jsContext, pair.value, 0));
         const JSValueOwner value(jsContext, JS_GetPropertyUint32(jsContext, pair.value, 1));
         if (JS_IsException(name.value) || JS_IsException(value.value)) {
-            return exceptionValue;
+            return JS_EXCEPTION;
         }
         const std::optional<std::string> nameText = readString(jsContext, name.value);
         const std::optional<std::string> valueText = readString(jsContext, value.value);
         if (!nameText.has_value() || !valueText.has_value()) {
-            return exceptionValue;
+            return JS_EXCEPTION;
         }
         for (const std::string* field : {&nameText.value(), &valueText.value()}) {
             if (field->size() > inputLimit - bytes) {
@@ -321,7 +316,7 @@ JSValue URLImpl::serializeQuery(JSContext* jsContext, JSValueConst pairs) try {
 
 JSModuleDef* URLImpl::createModule(JSContext* jsContext) {
     JSModuleDef* module = JS_NewCModule(jsContext, "amj:url_impl", [](JSContext* jsContext, JSModuleDef* module) -> int {
-        JSValueOwner urlImpl(jsContext, JS_NewObjectProto(jsContext, nullValue));
+        JSValueOwner urlImpl(jsContext, JS_NewObjectProto(jsContext, JS_NULL));
         if (JS_IsException(urlImpl.value)) {
             return -1;
         }
