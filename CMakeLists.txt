@@ -142,8 +142,10 @@ endif()
 
 ## == src/javascript == ##
 
-# File-by-file dependency order: text -> URL -> scheduler -> timeout -> fetch.
+# File-by-file dependency order: javascript -> text -> URL -> scheduler -> timeout -> fetch.
 add_library(amj_javascript STATIC
+    src/javascript/javascript.hpp
+    src/javascript/javascript.cpp
     src/javascript/text.js
     src/javascript/global.d.ts
     src/javascript/url_impl.cpp
