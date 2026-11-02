@@ -1,5 +1,7 @@
 #include "url_impl.hpp"
 
+#include "javascript.hpp"
+
 #include <ada.h> // IWYU pragma: keep
 #include <ada/implementation.h>
 #include <ada/url_aggregator.h>
@@ -11,7 +13,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
-#include <memory>
 #include <new>
 #include <optional>
 #include <string>
@@ -23,45 +24,6 @@ namespace {
 
 constexpr std::size_t inputLimit = 1048576;
 constexpr int64_t pairLimit = 65536;
-
-class JSValueOwner {
-  public:
-    JSContext* jsContext = nullptr;
-    JSValue value = JS_UNDEFINED;
-    JSValueOwner(JSContext* jsContext, JSValue value) {
-        this->jsContext = jsContext;
-        this->value = value;
-    }
-    ~JSValueOwner() {
-        JS_FreeValue(jsContext, value);
-    }
-    JSValueOwner(const JSValueOwner&) = delete;
-    JSValueOwner& operator=(const JSValueOwner&) = delete;
-    JSValue release() {
-        return std::exchange(value, JS_UNDEFINED);
-    }
-};
-
-std::optional<std::string> readString(JSContext* jsContext, JSValueConst value) {
-    if (!JS_IsString(value)) {
-        JS_ThrowTypeError(jsContext, "Native URL operations require strings");
-        return std::nullopt;
-    }
-    std::size_t length = 0;
-    const char* text = JS_ToCStringLen(jsContext, &length, value);
-    if (text == nullptr) {
-        return std::nullopt;
-    }
-    const auto release = [jsContext](const char* data) {
-        JS_FreeCString(jsContext, data);
-    };
-    const std::unique_ptr<const char, decltype(release)> ownedText(text, release);
-    if (length > inputLimit) {
-        JS_ThrowRangeError(jsContext, "URL input exceeds 1 MiB");
-        return std::nullopt;
-    }
-    return std::string(text, length);
-}
 
 JSValue snapshot(JSContext* jsContext, const ada::url_aggregator& url) {
     if (url.get_href().size() > inputLimit) {
@@ -84,12 +46,25 @@ JSValue snapshot(JSContext* jsContext, const ada::url_aggregator& url) {
         .search = std::string(search),
         .hash = std::string(url.get_hash()),
     };
-    const std::array<std::pair<const char*, std::string_view>, 11> fields = {
-        {{"href", parts.href}, {"origin", parts.origin}, {"protocol", parts.protocol}, {"username", parts.username}, {"password", parts.password}, {"host", parts.host}, {"hostname", parts.hostname}, {"port", parts.port}, {"pathname", parts.pathname}, {"search", parts.search}, {"hash", parts.hash}}};
-    const JSValueOwner result(jsContext, JS_NewObjectProto(jsContext, JS_NULL));
+    const AutoJSValue result(jsContext, JS_NewObjectProto(jsContext, JS_NULL));
     if (JS_IsException(result.value)) {
         return JS_EXCEPTION;
     }
+    const std::array<std::pair<const char*, std::string_view>, 11> fields = {
+        {
+            {"href", parts.href},
+            {"origin", parts.origin},
+            {"protocol", parts.protocol},
+            {"username", parts.username},
+            {"password", parts.password},
+            {"host", parts.host},
+            {"hostname", parts.hostname},
+            {"port", parts.port},
+            {"pathname", parts.pathname},
+            {"search", parts.search},
+            {"hash", parts.hash},
+        },
+    };
     for (const std::pair<const char*, std::string_view>& field : fields) {
         const JSValue text = JS_NewStringLen(jsContext, field.second.data(), field.second.size());
         if (JS_IsException(text) || JS_DefinePropertyValueStr(jsContext, result.value, field.first, text, JS_PROP_C_W_E) < 0) {
@@ -118,17 +93,29 @@ JSValue urlOperation(JSContext* jsContext, JSValueConst /* thisValue */, int arg
 } // namespace
 
 JSValue URLImpl::parse(JSContext* jsContext, JSValueConst input, JSValueConst baseOrNull) try {
-    const std::optional<std::string> inputText = readString(jsContext, input);
+    if (!JS_IsString(input)) {
+        return JS_ThrowTypeError(jsContext, "URLImpl.parse: argument 'input' must be a string");
+    }
+    const std::optional<std::string> inputText = convertToString(jsContext, input);
     if (!inputText.has_value()) {
         return JS_EXCEPTION;
+    }
+    if (inputText.value().size() > inputLimit) {
+        return JS_ThrowRangeError(jsContext, "URLImpl.parse: argument 'input' exceeds 1 MiB");
     }
     ada::result<ada::url_aggregator> parsed;
     if (JS_IsNull(baseOrNull)) {
         parsed = ada::parse<ada::url_aggregator>(inputText.value(), nullptr);
     } else {
-        const std::optional<std::string> baseText = readString(jsContext, baseOrNull);
+        if (!JS_IsString(baseOrNull)) {
+            return JS_ThrowTypeError(jsContext, "URLImpl.parse: argument 'baseOrNull' must be a string or null");
+        }
+        const std::optional<std::string> baseText = convertToString(jsContext, baseOrNull);
         if (!baseText.has_value()) {
             return JS_EXCEPTION;
+        }
+        if (baseText.value().size() > inputLimit) {
+            return JS_ThrowRangeError(jsContext, "URLImpl.parse: argument 'baseOrNull' exceeds 1 MiB");
         }
         const ada::result<ada::url_aggregator> base = ada::parse<ada::url_aggregator>(baseText.value(), nullptr);
         if (!base.has_value()) {
@@ -149,11 +136,35 @@ JSValue URLImpl::parse(JSContext* jsContext, JSValueConst input, JSValueConst ba
 }
 
 JSValue URLImpl::set(JSContext* jsContext, JSValueConst href, JSValueConst component, JSValueConst value) try {
-    const std::optional<std::string> hrefText = readString(jsContext, href);
-    const std::optional<std::string> componentText = readString(jsContext, component);
-    const std::optional<std::string> valueText = readString(jsContext, value);
-    if (!hrefText.has_value() || !componentText.has_value() || !valueText.has_value()) {
+    if (!JS_IsString(href)) {
+        return JS_ThrowTypeError(jsContext, "URLImpl.set: argument 'href' must be a string");
+    }
+    const std::optional<std::string> hrefText = convertToString(jsContext, href);
+    if (!hrefText.has_value()) {
         return JS_EXCEPTION;
+    }
+    if (hrefText.value().size() > inputLimit) {
+        return JS_ThrowRangeError(jsContext, "URLImpl.set: argument 'href' exceeds 1 MiB");
+    }
+    if (!JS_IsString(component)) {
+        return JS_ThrowTypeError(jsContext, "URLImpl.set: argument 'component' must be a string");
+    }
+    const std::optional<std::string> componentText = convertToString(jsContext, component);
+    if (!componentText.has_value()) {
+        return JS_EXCEPTION;
+    }
+    if (componentText.value().size() > inputLimit) {
+        return JS_ThrowRangeError(jsContext, "URLImpl.set: argument 'component' exceeds 1 MiB");
+    }
+    if (!JS_IsString(value)) {
+        return JS_ThrowTypeError(jsContext, "URLImpl.set: argument 'value' must be a string");
+    }
+    const std::optional<std::string> valueText = convertToString(jsContext, value);
+    if (!valueText.has_value()) {
+        return JS_EXCEPTION;
+    }
+    if (valueText.value().size() > inputLimit) {
+        return JS_ThrowRangeError(jsContext, "URLImpl.set: argument 'value' exceeds 1 MiB");
     }
     ada::result<ada::url_aggregator> parsed = ada::parse<ada::url_aggregator>(hrefText.value(), nullptr);
     if (!parsed.has_value()) {
@@ -174,36 +185,36 @@ JSValue URLImpl::set(JSContext* jsContext, JSValueConst href, JSValueConst compo
     }
     bool accepted = true;
     switch (urlComponent.value()) {
-    case URLComponent::Href:
-        accepted = url.set_href(valueText.value());
-        break;
-    case URLComponent::Protocol:
-        accepted = url.set_protocol(valueText.value());
-        break;
-    case URLComponent::Username:
-        accepted = url.set_username(valueText.value());
-        break;
-    case URLComponent::Password:
-        accepted = url.set_password(valueText.value());
-        break;
-    case URLComponent::Host:
-        accepted = url.set_host(valueText.value());
-        break;
-    case URLComponent::Hostname:
-        accepted = url.set_hostname(valueText.value());
-        break;
-    case URLComponent::Port:
-        accepted = url.set_port(valueText.value());
-        break;
-    case URLComponent::Pathname:
-        accepted = url.set_pathname(valueText.value());
-        break;
-    case URLComponent::Search:
-        url.set_search(valueText.value());
-        break;
-    case URLComponent::Hash:
-        url.set_hash(valueText.value());
-        break;
+        case URLComponent::Href:
+            accepted = url.set_href(valueText.value());
+            break;
+        case URLComponent::Protocol:
+            accepted = url.set_protocol(valueText.value());
+            break;
+        case URLComponent::Username:
+            accepted = url.set_username(valueText.value());
+            break;
+        case URLComponent::Password:
+            accepted = url.set_password(valueText.value());
+            break;
+        case URLComponent::Host:
+            accepted = url.set_host(valueText.value());
+            break;
+        case URLComponent::Hostname:
+            accepted = url.set_hostname(valueText.value());
+            break;
+        case URLComponent::Port:
+            accepted = url.set_port(valueText.value());
+            break;
+        case URLComponent::Pathname:
+            accepted = url.set_pathname(valueText.value());
+            break;
+        case URLComponent::Search:
+            url.set_search(valueText.value());
+            break;
+        case URLComponent::Hash:
+            url.set_hash(valueText.value());
+            break;
     }
     if (!accepted) {
         return JS_NULL;
@@ -218,21 +229,27 @@ JSValue URLImpl::set(JSContext* jsContext, JSValueConst href, JSValueConst compo
 }
 
 JSValue URLImpl::parseQuery(JSContext* jsContext, JSValueConst query) try {
-    const std::optional<std::string> text = readString(jsContext, query);
+    if (!JS_IsString(query)) {
+        return JS_ThrowTypeError(jsContext, "URLImpl.parseQuery: argument 'query' must be a string");
+    }
+    const std::optional<std::string> text = convertToString(jsContext, query);
     if (!text.has_value()) {
         return JS_EXCEPTION;
+    }
+    if (text.value().size() > inputLimit) {
+        return JS_ThrowRangeError(jsContext, "URLImpl.parseQuery: argument 'query' exceeds 1 MiB");
     }
     if (std::count(text.value().begin(), text.value().end(), '&') >= pairLimit) {
         return JS_ThrowRangeError(jsContext, "URL query exceeds 65536 pairs");
     }
     const ada::url_search_params searchParams(text.value());
-    JSValueOwner result(jsContext, JS_NewArray(jsContext));
+    AutoJSValue result(jsContext, JS_NewArray(jsContext));
     if (JS_IsException(result.value)) {
         return JS_EXCEPTION;
     }
     uint32_t index = 0;
     for (const std::pair<std::string, std::string>& pair : searchParams) {
-        JSValueOwner fields(jsContext, JS_NewArray(jsContext));
+        AutoJSValue fields(jsContext, JS_NewArray(jsContext));
         if (JS_IsException(fields.value)) {
             return JS_EXCEPTION;
         }
@@ -272,7 +289,7 @@ JSValue URLImpl::serializeQuery(JSContext* jsContext, JSValueConst pairs) try {
     ada::url_search_params searchParams;
     std::size_t bytes = 0;
     for (int64_t index = 0; index < count; index++) {
-        const JSValueOwner pair(jsContext, JS_GetPropertyUint32(jsContext, pairs, static_cast<uint32_t>(index)));
+        const AutoJSValue pair(jsContext, JS_GetPropertyUint32(jsContext, pairs, static_cast<uint32_t>(index)));
         int64_t length = 0;
         if (JS_IsException(pair.value)) {
             return JS_EXCEPTION;
@@ -283,15 +300,30 @@ JSValue URLImpl::serializeQuery(JSContext* jsContext, JSValueConst pairs) try {
             }
             return JS_ThrowTypeError(jsContext, "Expected two-string query pairs");
         }
-        const JSValueOwner name(jsContext, JS_GetPropertyUint32(jsContext, pair.value, 0));
-        const JSValueOwner value(jsContext, JS_GetPropertyUint32(jsContext, pair.value, 1));
+        const AutoJSValue name(jsContext, JS_GetPropertyUint32(jsContext, pair.value, 0));
+        const AutoJSValue value(jsContext, JS_GetPropertyUint32(jsContext, pair.value, 1));
         if (JS_IsException(name.value) || JS_IsException(value.value)) {
             return JS_EXCEPTION;
         }
-        const std::optional<std::string> nameText = readString(jsContext, name.value);
-        const std::optional<std::string> valueText = readString(jsContext, value.value);
-        if (!nameText.has_value() || !valueText.has_value()) {
+        if (!JS_IsString(name.value)) {
+            return JS_ThrowTypeError(jsContext, "URLImpl.serializeQuery: pair name must be a string");
+        }
+        const std::optional<std::string> nameText = convertToString(jsContext, name.value);
+        if (!nameText.has_value()) {
             return JS_EXCEPTION;
+        }
+        if (nameText.value().size() > inputLimit) {
+            return JS_ThrowRangeError(jsContext, "URLImpl.serializeQuery: pair name exceeds 1 MiB");
+        }
+        if (!JS_IsString(value.value)) {
+            return JS_ThrowTypeError(jsContext, "URLImpl.serializeQuery: pair value must be a string");
+        }
+        const std::optional<std::string> valueText = convertToString(jsContext, value.value);
+        if (!valueText.has_value()) {
+            return JS_EXCEPTION;
+        }
+        if (valueText.value().size() > inputLimit) {
+            return JS_ThrowRangeError(jsContext, "URLImpl.serializeQuery: pair value exceeds 1 MiB");
         }
         for (const std::string* field : {&nameText.value(), &valueText.value()}) {
             if (field->size() > inputLimit - bytes) {
@@ -316,7 +348,7 @@ JSValue URLImpl::serializeQuery(JSContext* jsContext, JSValueConst pairs) try {
 
 JSModuleDef* URLImpl::createModule(JSContext* jsContext) {
     JSModuleDef* module = JS_NewCModule(jsContext, "amj:url_impl", [](JSContext* jsContext, JSModuleDef* module) -> int {
-        JSValueOwner urlImpl(jsContext, JS_NewObjectProto(jsContext, JS_NULL));
+        AutoJSValue urlImpl(jsContext, JS_NewObjectProto(jsContext, JS_NULL));
         if (JS_IsException(urlImpl.value)) {
             return -1;
         }

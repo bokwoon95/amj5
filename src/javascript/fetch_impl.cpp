@@ -1,6 +1,7 @@
 #include "fetch_impl.hpp"
 
 #include "errors/errors.hpp"
+#include "javascript.hpp"
 #include "scheduler.hpp"
 
 #include <ada.h> // IWYU pragma: keep
@@ -45,24 +46,6 @@ constexpr std::size_t headerLimit = 65536;
 constexpr std::size_t bodyLimit = 33554432;
 constexpr std::size_t chunkLimit = 65536;
 constexpr std::size_t bufferLimit = 262144;
-
-class JSValueOwner {
-  public:
-    JSContext* jsContext = nullptr;
-    JSValue value = undefinedValue;
-    JSValueOwner(JSContext* jsContext, JSValue value) {
-        this->jsContext = jsContext;
-        this->value = value;
-    }
-    ~JSValueOwner() {
-        JS_FreeValue(jsContext, value);
-    }
-    JSValueOwner(const JSValueOwner&) = delete;
-    JSValueOwner& operator=(const JSValueOwner&) = delete;
-    JSValue release() {
-        return std::exchange(value, undefinedValue);
-    }
-};
 
 // Only this native data is accessed by the worker. The owner retains it until
 // stop() joins the worker. Scheduler notifications happen outside this mutex.
@@ -371,7 +354,7 @@ errors::Error deliver(const std::shared_ptr<FetchRequestState>& fetchRequestStat
     }
     fetchRequestState->transport->condition.notify_all();
     JSContext* jsContext = fetchRequestState->jsContext;
-    JSValueOwner callback(jsContext, undefinedValue);
+    AutoJSValue callback(jsContext, undefinedValue);
     if (reading) {
         fetchRequestState->readID = 0;
         callback.value = std::exchange(fetchRequestState->onRead, undefinedValue);
@@ -383,8 +366,8 @@ errors::Error deliver(const std::shared_ptr<FetchRequestState>& fetchRequestStat
     if (JS_IsUndefined(callback.value)) {
         return {};
     }
-    JSValueOwner failureValue(jsContext, nullValue);
-    JSValueOwner data(jsContext, nullValue);
+    AutoJSValue failureValue(jsContext, nullValue);
+    AutoJSValue data(jsContext, nullValue);
     if (failure.has_value()) {
         failureValue.value = JS_NewObjectProto(jsContext, nullValue);
         if (!JS_IsException(failureValue.value)) {
@@ -397,7 +380,7 @@ errors::Error deliver(const std::shared_ptr<FetchRequestState>& fetchRequestStat
             }
         }
     } else if (reading && !done) {
-        const JSValueOwner buffer(jsContext, JS_NewArrayBufferCopy(jsContext, chunk.data(), chunk.size()));
+        const AutoJSValue buffer(jsContext, JS_NewArrayBufferCopy(jsContext, chunk.data(), chunk.size()));
         if (!JS_IsException(buffer.value)) {
             // QuickJS-NG's public helper reads offset/length slots even with argc=1.
             std::array<JSValue, 3> arguments = {buffer.value, undefinedValue, undefinedValue};
@@ -405,11 +388,11 @@ errors::Error deliver(const std::shared_ptr<FetchRequestState>& fetchRequestStat
         }
     } else if (!reading) {
         data.value = JS_NewObjectProto(jsContext, nullValue);
-        JSValueOwner pairs(jsContext, JS_NewArray(jsContext));
+        AutoJSValue pairs(jsContext, JS_NewArray(jsContext));
         if (!JS_IsException(data.value) && !JS_IsException(pairs.value)) {
             uint32_t index = 0;
             for (const std::pair<std::string, std::string>& header : metadata.headers) {
-                JSValueOwner pair(jsContext, JS_NewArray(jsContext));
+                AutoJSValue pair(jsContext, JS_NewArray(jsContext));
                 if (JS_IsException(pair.value)) {
                     break;
                 }
@@ -438,7 +421,7 @@ errors::Error deliver(const std::shared_ptr<FetchRequestState>& fetchRequestStat
         };
     }
     std::array<JSValue, 2> arguments = {failureValue.value, data.value};
-    const JSValueOwner result(jsContext, JS_Call(jsContext, callback.value, undefinedValue, static_cast<int>(arguments.size()), arguments.data()));
+    const AutoJSValue result(jsContext, JS_Call(jsContext, callback.value, undefinedValue, static_cast<int>(arguments.size()), arguments.data()));
     if (JS_IsException(result.value)) {
         return errors::Error{
             .errorCode = ErrorCode::JSException,
@@ -446,27 +429,6 @@ errors::Error deliver(const std::shared_ptr<FetchRequestState>& fetchRequestStat
         };
     }
     return {};
-}
-
-std::optional<std::string> readString(JSContext* jsContext, JSValueConst value, std::size_t limit) {
-    if (!JS_IsString(value)) {
-        JS_ThrowTypeError(jsContext, "Native Fetch requires strings");
-        return std::nullopt;
-    }
-    std::size_t length = 0;
-    const char* data = JS_ToCStringLen(jsContext, &length, value);
-    if (data == nullptr) {
-        return std::nullopt;
-    }
-    const auto release = [jsContext](const char* text) {
-        JS_FreeCString(jsContext, text);
-    };
-    const std::unique_ptr<const char, decltype(release)> ownedText(data, release);
-    if (length > limit) {
-        JS_ThrowRangeError(jsContext, "HTTP string exceeds its size limit");
-        return std::nullopt;
-    }
-    return std::string(data, length);
 }
 
 bool isToken(const std::string& text) {
@@ -510,10 +472,25 @@ JSValue FetchImpl::start(JSContext* jsContext, JSValueConst url, JSValueConst me
     if (!JS_IsFunction(jsContext, onHeaders)) {
         return JS_ThrowTypeError(jsContext, "Headers completion must be a function");
     }
-    const std::optional<std::string> urlText = readString(jsContext, url, headerLimit);
-    const std::optional<std::string> methodText = readString(jsContext, method, 128);
-    if (!urlText.has_value() || !methodText.has_value()) {
+    if (!JS_IsString(url)) {
+        return JS_ThrowTypeError(jsContext, "FetchImpl.start: argument 'url' must be a string");
+    }
+    const std::optional<std::string> urlText = convertToString(jsContext, url);
+    if (!urlText.has_value()) {
         return exceptionValue;
+    }
+    if (urlText.value().size() > headerLimit) {
+        return JS_ThrowRangeError(jsContext, "FetchImpl.start: argument 'url' exceeds 64 KiB");
+    }
+    if (!JS_IsString(method)) {
+        return JS_ThrowTypeError(jsContext, "FetchImpl.start: argument 'method' must be a string");
+    }
+    const std::optional<std::string> methodText = convertToString(jsContext, method);
+    if (!methodText.has_value()) {
+        return exceptionValue;
+    }
+    if (methodText.value().size() > 128) {
+        return JS_ThrowRangeError(jsContext, "FetchImpl.start: argument 'method' exceeds 128 bytes");
     }
     const ada::result<ada::url_aggregator> parsed = ada::parse<ada::url_aggregator>(urlText.value(), nullptr);
     if (!parsed.has_value() || (parsed.value().get_protocol() != "http:" && parsed.value().get_protocol() != "https:") || !parsed.value().get_username().empty() || !parsed.value().get_password().empty()) {
@@ -548,7 +525,7 @@ JSValue FetchImpl::start(JSContext* jsContext, JSValueConst url, JSValueConst me
     }
     std::size_t headerBytes = 0;
     for (int64_t index = 0; index < count; index++) {
-        const JSValueOwner pair(jsContext, JS_GetPropertyUint32(jsContext, headerPairs, static_cast<uint32_t>(index)));
+        const AutoJSValue pair(jsContext, JS_GetPropertyUint32(jsContext, headerPairs, static_cast<uint32_t>(index)));
         if (JS_IsException(pair.value)) {
             return exceptionValue;
         }
@@ -562,15 +539,30 @@ JSValue FetchImpl::start(JSContext* jsContext, JSValueConst url, JSValueConst me
         if (length != 2) {
             return JS_ThrowTypeError(jsContext, "Expected two fields per header pair");
         }
-        const JSValueOwner name(jsContext, JS_GetPropertyUint32(jsContext, pair.value, 0));
-        const JSValueOwner value(jsContext, JS_GetPropertyUint32(jsContext, pair.value, 1));
+        const AutoJSValue name(jsContext, JS_GetPropertyUint32(jsContext, pair.value, 0));
+        const AutoJSValue value(jsContext, JS_GetPropertyUint32(jsContext, pair.value, 1));
         if (JS_IsException(name.value) || JS_IsException(value.value)) {
             return exceptionValue;
         }
-        const std::optional<std::string> nameText = readString(jsContext, name.value, headerLimit);
-        const std::optional<std::string> valueText = readString(jsContext, value.value, headerLimit);
-        if (!nameText.has_value() || !valueText.has_value()) {
+        if (!JS_IsString(name.value)) {
+            return JS_ThrowTypeError(jsContext, "FetchImpl.start: header name must be a string");
+        }
+        const std::optional<std::string> nameText = convertToString(jsContext, name.value);
+        if (!nameText.has_value()) {
             return exceptionValue;
+        }
+        if (nameText.value().size() > headerLimit) {
+            return JS_ThrowRangeError(jsContext, "FetchImpl.start: header name exceeds 64 KiB");
+        }
+        if (!JS_IsString(value.value)) {
+            return JS_ThrowTypeError(jsContext, "FetchImpl.start: header value must be a string");
+        }
+        const std::optional<std::string> valueText = convertToString(jsContext, value.value);
+        if (!valueText.has_value()) {
+            return exceptionValue;
+        }
+        if (valueText.value().size() > headerLimit) {
+            return JS_ThrowRangeError(jsContext, "FetchImpl.start: header value exceeds 64 KiB");
         }
         std::string lowerName = nameText.value();
         for (char& character : lowerName) {
@@ -598,7 +590,7 @@ JSValue FetchImpl::start(JSContext* jsContext, JSValueConst url, JSValueConst me
     std::size_t offset = 0;
     std::size_t length = 0;
     std::size_t elementSize = 0;
-    const JSValueOwner buffer(jsContext, JS_GetTypedArrayBuffer(jsContext, bytes, &offset, &length, &elementSize));
+    const AutoJSValue buffer(jsContext, JS_GetTypedArrayBuffer(jsContext, bytes, &offset, &length, &elementSize));
     if (JS_IsException(buffer.value)) {
         return exceptionValue;
     }
@@ -643,7 +635,7 @@ JSValue FetchImpl::start(JSContext* jsContext, JSValueConst url, JSValueConst me
     client.set_decompress(true);
     client.enable_server_certificate_verification(true);
     client.enable_server_hostname_verification(true);
-    const JSValueOwner handle(jsContext, JS_NewObjectProtoClass(jsContext, nullValue, getClassID(JS_GetRuntime(jsContext))));
+    const AutoJSValue handle(jsContext, JS_NewObjectProtoClass(jsContext, nullValue, getClassID(JS_GetRuntime(jsContext))));
     if (JS_IsException(handle.value)) {
         return exceptionValue;
     }
@@ -805,7 +797,7 @@ JSModuleDef* FetchImpl::createModule(JSContext* jsContext, Scheduler& scheduler)
     std::unique_ptr<FetchHandle> fetchHandle = std::make_unique<FetchHandle>();
     fetchHandle->fetchImpl = std::make_unique<FetchImpl>();
     fetchHandle->fetchImpl->fetchImplState = fetchImplState;
-    JSValueOwner object(jsContext, JS_NewObjectProtoClass(jsContext, nullValue, classID));
+    AutoJSValue object(jsContext, JS_NewObjectProtoClass(jsContext, nullValue, classID));
     if (JS_IsException(object.value)) {
         return nullptr;
     }

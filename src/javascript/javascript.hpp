@@ -2,33 +2,35 @@
 
 #include <quickjs.h>
 
+#include <optional>
+#include <string>
+#include <utility>
+
 namespace amj::javascript {
 
-// Owns one QuickJS reference. The context must outlive this wrapper and all copies.
-// Use only on the context's owner thread; reference counting is not atomic.
-class RefCountedJSValue {
+// Owns one QuickJS reference and releases it on destruction unless release()
+// is called. Noncopyable. The context must outlive this wrapper. Use only on
+// the context's owner thread.
+class AutoJSValue {
   public:
-    RefCountedJSValue() = default;
-    // Adopts an existing owned reference without incrementing its reference count.
-    // jsContext must be valid, including when value is a primitive.
-    RefCountedJSValue(JSContext* jsContext, JSValue value);
-    ~RefCountedJSValue();
-    RefCountedJSValue(const RefCountedJSValue& other);
-    RefCountedJSValue& operator=(const RefCountedJSValue& other);
-    RefCountedJSValue(RefCountedJSValue&& other) noexcept;
-    RefCountedJSValue& operator=(RefCountedJSValue&& other) noexcept;
-
-    // Creates an owned reference from a borrowed value by incrementing its count.
-    static RefCountedJSValue fromBorrowed(JSContext* jsContext, JSValueConst value);
-    JSContext* getContext() const;
-    // Returns a borrowed value; ownership remains with this wrapper.
-    JSValue getValue() const;
-    // Transfers the owned reference to the caller, leaving this wrapper empty.
-    JSValue release();
-
-  private:
     JSContext* jsContext = nullptr;
     JSValue value = JS_UNDEFINED;
+    AutoJSValue(JSContext* jsContext, JSValue value) {
+        this->jsContext = jsContext;
+        this->value = value;
+    }
+    ~AutoJSValue() {
+        JS_FreeValue(jsContext, value);
+    }
+    AutoJSValue(const AutoJSValue&) = delete;
+    AutoJSValue& operator=(const AutoJSValue&) = delete;
+    JSValue release() {
+        return std::exchange(value, JS_UNDEFINED);
+    }
 };
+
+// Converts to UTF-8 without type validation or size limits. Returns nullopt on
+// failure with a pending JS exception. Check JS_IsString() first if coercion is unwanted.
+std::optional<std::string> convertToString(JSContext* jsContext, JSValueConst value);
 
 } // namespace amj::javascript
