@@ -152,6 +152,7 @@ add_library(amj_javascript STATIC
     src/javascript/scheduler.cpp
     src/javascript/timeout_impl.cpp
     src/javascript/timeout_impl.d.ts
+    src/javascript/timeout.js
     src/javascript/fetch_impl.cpp
     src/javascript/fetch.js
     src/javascript/fetch_impl.d.ts
@@ -162,6 +163,7 @@ target_link_libraries(amj_javascript PUBLIC amj_errors qjs PRIVATE Threads::Thre
 configure_file(src/javascript/url.js javascript/url.js COPYONLY)
 configure_file(src/javascript/text.js javascript/text.js COPYONLY)
 configure_file(src/javascript/fetch.js javascript/fetch.js COPYONLY)
+configure_file(src/javascript/timeout.js javascript/timeout.js COPYONLY)
 configure_file(src/javascript/global.d.ts javascript/global.d.ts COPYONLY)
 configure_file(src/javascript/url_impl.d.ts javascript/url_impl.d.ts COPYONLY)
 configure_file(src/javascript/timeout_impl.d.ts javascript/timeout_impl.d.ts COPYONLY)

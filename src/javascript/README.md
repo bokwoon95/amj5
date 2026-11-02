@@ -11,7 +11,8 @@ The host chooses which target receives those exports.
 | `amj:text` | `text.js` | `TextEncoder`, `TextDecoder` |
 | `amj:url_impl` | `url_impl.hpp/.cpp` | `urlImpl` |
 | `amj:url` | `url.js` | `URL`, `URLSearchParams` |
-| `amj:timeout_impl` | `timeout_impl.hpp/.cpp` | `setTimeout`, `clearTimeout` |
+| `amj:timeout_impl` | `timeout_impl.hpp/.cpp` | `timeoutImpl` |
+| `amj:timeout` | `timeout.js` | `setTimeout`, `clearTimeout` |
 | `amj:fetch_impl` | `fetch_impl.hpp/.cpp` | `fetchImpl` |
 | `amj:fetch` | `fetch.js` | `Headers`, `fetch` |
 
@@ -26,22 +27,26 @@ normalization, Response objects, and body readers. Response and reader classes
 are internal, not public constructors.
 
 `TimeoutImpl::createModule(jsContext, scheduler)` registers `amj:timeout_impl`,
-exporting the two C++-backed timer functions directly. There is intentionally no
-`timeout.js` or `amj:timeout` facade.
+exporting `timeoutImpl` with normalized `setTimeout(callback, delay)` and
+`clearTimeout(timerID)` methods. The C++ header and `.d.ts` describe those same
+operations. `timeout.js` implements the public API: callback validation, numeric
+coercion, delay clamping/truncation, and forwarding up to 256 extra arguments via
+a closure. C++ owns callback lifetime, scheduling, cancellation, and cleanup;
+it defensively validates normalized input and enforces the 128-timer limit.
 
 Register each C++ module once per context before loading its consumers. Check
 for nullptr and a pending JS exception. Module definitions belong to the context,
-not the caller. Each implementation also provides `create()` to construct its
-JS exports object independently of module registration. All native instances
-use the same context and owner thread as their scheduler.
+not the caller. Each implementation constructs its JS exports inside
+`createModule()`. All native instances use the same context and owner thread
+as their scheduler.
 
 The embedding host must supply a QuickJS module loader that maps `amj:text`,
-`amj:url`, and `amj:fetch` to the installed JS files. Preserve the registered
+`amj:url`, `amj:timeout`, and `amj:fetch` to the installed JS files. Preserve the registered
 `*_impl` names, and resolve relative JS imports against their file paths.
 There is not yet an application-level JS host/loader in this library; the
 module-name mappings in tsconfig configure TypeScript, not QuickJS execution.
 
-After evaluating each public facade (or the timer module), the host can obtain
+After evaluating each public facade, the host can obtain
 its namespace with `JS_GetModuleNamespace`, enumerate own string exports, and
 copy their values onto its chosen target. No JS installers or hardcoded
 constructor-name lists are needed. Check evaluation/property-operation failures
@@ -66,13 +71,12 @@ and `FetchHandle` are not part of the JS contract. The request handle's TypeScri
 brand is type-only; JS must not inspect its representation.
 
 Only `global.d.ts` declares the names installed globally by the host. It references
-public JS exports through `typeof import("amj:fetch")` and similar expressions;
-timers reference `amj:timeout_impl` directly. This does not duplicate class or
-function signatures and does not execute code. Dependency direction is:
+public JS exports through `typeof import("amj:fetch")` and similar expressions,
+including `amj:timeout`. This does not duplicate class or function signatures and
+does not execute code. Dependency direction is:
 
 ```text
 C++ contract <- JS facade <- global.d.ts
-C++ timer contract       <- global.d.ts
 ```
 
 The `_impl` filename suffix also avoids shadowing inferred JS module types:
@@ -96,11 +100,12 @@ tsc --project tsconfig.json
 For future user-script directories, generate a tsconfig with `allowJs`,
 `checkJs`, `noEmit`, `lib: ["ES2023"]`, `types: []`, and a `files` list pointing
 to installed `global.d.ts`, `url_impl.d.ts`, `fetch_impl.d.ts`, and
-`timeout_impl.d.ts`. Add `paths` entries for `amj:text`, `amj:url`, and
-`amj:fetch`, pointing to the installed JS files. Paths are relative to the config
+`timeout_impl.d.ts`. Add `paths` entries for `amj:text`, `amj:url`, `amj:timeout`,
+and `amj:fetch`, pointing to the installed JS files. Paths are relative to the config
 or can be generated as absolute installation paths. Editor definitions for globals
-lead to `global.d.ts`; following its imported member leads to the JS export or,
-for timers, the C++ module declaration. TypeScript cannot navigate into C++.
+lead to `global.d.ts`; following its imported member leads to the JS export.
+Following implementation imports leads to the C++ module declarations.
+TypeScript cannot navigate into C++.
 
 ## Scheduling and cleanup
 
@@ -121,8 +126,8 @@ or run JS. Callers should cancel/release readers in `finally`. Cancellation/join
 can block on native DNS/connect/OS calls: do not run this host loop on the UI thread.
 
 Clear/destroy the scheduler before freeing the JS context. `clear()` invalidates
-fetch and timer owners. Use a fresh context/module registration, or create new
-lower-level exports objects, to reuse the scheduler. URL and text do not depend
+fetch and timer owners. Use a fresh context/module registration to reuse the
+scheduler. URL and text do not depend
 on scheduler lifetime.
 
 The fetch facade remains a subset: HTTP(S), no redirects/cookies/retries,

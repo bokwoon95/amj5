@@ -14,7 +14,8 @@
     "paths": {
       "amj:text": ["./src/javascript/text.js"],
       "amj:url": ["./src/javascript/url.js"],
-      "amj:fetch": ["./src/javascript/fetch.js"]
+      "amj:fetch": ["./src/javascript/fetch.js"],
+      "amj:timeout": ["./src/javascript/timeout.js"]
     }
   },
   "files": [

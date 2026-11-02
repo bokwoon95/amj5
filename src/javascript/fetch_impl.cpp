@@ -783,7 +783,7 @@ JSValue FetchImpl::close(JSContext* jsContext, JSValueConst request) try {
     return JS_ThrowInternalError(jsContext, "Unexpected native HTTP close failure");
 }
 
-JSValue FetchImpl::create(JSContext* jsContext, Scheduler& scheduler) try {
+JSModuleDef* FetchImpl::createModule(JSContext* jsContext, Scheduler& scheduler) try {
     JSRuntime* jsRuntime = JS_GetRuntime(jsContext);
     const JSClassID classID = getClassID(jsRuntime);
     if (!JS_IsRegisteredClass(jsRuntime, classID)) {
@@ -795,7 +795,8 @@ JSValue FetchImpl::create(JSContext* jsContext, Scheduler& scheduler) try {
             .exotic = nullptr,
         };
         if (JS_NewClass(jsRuntime, classID, &definition) < 0) {
-            return JS_ThrowOutOfMemory(jsContext);
+            JS_ThrowOutOfMemory(jsContext);
+            return nullptr;
         }
     }
     const std::shared_ptr<FetchImplState> fetchImplState = std::make_shared<FetchImplState>();
@@ -806,7 +807,7 @@ JSValue FetchImpl::create(JSContext* jsContext, Scheduler& scheduler) try {
     fetchHandle->fetchImpl->fetchImplState = fetchImplState;
     JSValueOwner object(jsContext, JS_NewObjectProtoClass(jsContext, nullValue, classID));
     if (JS_IsException(object.value)) {
-        return exceptionValue;
+        return nullptr;
     }
     JS_SetOpaque(object.value, fetchHandle.release());
     const std::array<const char*, 3> names = {"start", "read", "close"};
@@ -815,7 +816,7 @@ JSValue FetchImpl::create(JSContext* jsContext, Scheduler& scheduler) try {
         JSValue functionData = object.value;
         const JSValue function = JS_NewCFunctionData(jsContext, fetchOperation, argumentCounts.at(index), static_cast<int>(index), 1, &functionData);
         if (JS_IsException(function) || JS_DefinePropertyValueStr(jsContext, object.value, names.at(index), function, JS_PROP_C_W_E) < 0) {
-            return exceptionValue;
+            return nullptr;
         }
     }
     const std::expected<int64_t, errors::Error> cleanupIDResult = scheduler.registerCleanup([fetchImplState]() -> errors::Error {
@@ -839,29 +840,10 @@ JSValue FetchImpl::create(JSContext* jsContext, Scheduler& scheduler) try {
         return firstError;
     });
     if (!cleanupIDResult.has_value()) {
-        return JS_ThrowInternalError(jsContext, "%s", cleanupIDResult.error().toString().c_str());
-    }
-    fetchImplState->active = true;
-    return object.release();
-} catch (const std::bad_alloc&) {
-    return JS_ThrowOutOfMemory(jsContext);
-} catch (const std::exception& exception) {
-    if (JS_HasException(jsContext)) {
-        return exceptionValue;
-    }
-    return JS_ThrowInternalError(jsContext, "%s", exception.what());
-} catch (...) {
-    if (JS_HasException(jsContext)) {
-        return exceptionValue;
-    }
-    return JS_ThrowInternalError(jsContext, "Unexpected native Fetch creation failure");
-}
-
-JSModuleDef* FetchImpl::createModule(JSContext* jsContext, Scheduler& scheduler) {
-    JSValueOwner fetchImpl(jsContext, FetchImpl::create(jsContext, scheduler));
-    if (JS_IsException(fetchImpl.value)) {
+        JS_ThrowInternalError(jsContext, "%s", cleanupIDResult.error().toString().c_str());
         return nullptr;
     }
+    fetchImplState->active = true;
     JSModuleDef* module = JS_NewCModule(jsContext, "amj:fetch_impl", [](JSContext* jsContext, JSModuleDef* module) -> int {
         const JSValue fetchImpl = JS_GetModulePrivateValue(jsContext, module);
         if (JS_IsException(fetchImpl)) {
@@ -872,10 +854,23 @@ JSModuleDef* FetchImpl::createModule(JSContext* jsContext, Scheduler& scheduler)
     if (module == nullptr || JS_AddModuleExport(jsContext, module, "fetchImpl") < 0) {
         return nullptr;
     }
-    if (JS_SetModulePrivateValue(jsContext, module, fetchImpl.release()) < 0) {
+    if (JS_SetModulePrivateValue(jsContext, module, object.release()) < 0) {
         return nullptr;
     }
     return module;
+} catch (const std::bad_alloc&) {
+    JS_ThrowOutOfMemory(jsContext);
+    return nullptr;
+} catch (const std::exception& exception) {
+    if (!JS_HasException(jsContext)) {
+        JS_ThrowInternalError(jsContext, "%s", exception.what());
+    }
+    return nullptr;
+} catch (...) {
+    if (!JS_HasException(jsContext)) {
+        JS_ThrowInternalError(jsContext, "Unexpected FetchImpl module creation failure");
+    }
+    return nullptr;
 }
 
 } // namespace amj::javascript

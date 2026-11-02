@@ -51,22 +51,18 @@ class FetchImpl {
     // undefined, or JS_EXCEPTION on failure. JS settles its own cancelled Promises.
     JSValue close(JSContext* jsContext, JSValueConst request);
 
-    // Returns a private JS object exposing start/read/close bound to an owned
-    // FetchImpl instance, or JS_EXCEPTION. Used by createModule().
+    // Registers amj:fetch_impl, exporting fetchImpl bound to this scheduler.
+    // Call once per context before loading fetch.js. Returns a context-owned
+    // module, or nullptr with a pending exception.
     // The scheduler/context are borrowed. Clear/destroy the scheduler before the
     // context. Cleanup invalidates the instance and joins workers without calling
-    // JS; recreate after clear(). Completion callbacks hold weak native references,
+    // JS; use fresh registration/context after clear(). Callbacks hold weak references,
     // so destroying scheduler callbacks cannot join workers under its mutex.
     //
     // HTTP(S) only, verified TLS, no credentials/redirects/retries/cookies. Limits:
     // 64 requests, 64 KiB headers/URL, 32 MiB upload, 64 KiB chunks, 256 KiB queued
     // body per request. Timeouts: 10s connect, 60s read, 30s write. DNS/connect/OS
     // calls may delay cancellation/join: use off the UI thread.
-    static JSValue create(JSContext* jsContext, Scheduler& scheduler);
-
-    // Registers amj:fetch_impl, exporting fetchImpl bound to this scheduler.
-    // Call once per context before loading fetch.js. Returns a context-owned
-    // module, or nullptr with a pending exception. Same lifetime rules as create().
     static JSModuleDef* createModule(JSContext* jsContext, Scheduler& scheduler);
 
   private:

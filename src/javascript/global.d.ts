@@ -17,6 +17,6 @@ type Headers = import("amj:fetch").Headers;
 
 declare var fetch: typeof import("amj:fetch").fetch;
 
-declare var setTimeout: typeof import("amj:timeout_impl").setTimeout;
+declare var setTimeout: typeof import("amj:timeout").setTimeout;
 
-declare var clearTimeout: typeof import("amj:timeout_impl").clearTimeout;
+declare var clearTimeout: typeof import("amj:timeout").clearTimeout;

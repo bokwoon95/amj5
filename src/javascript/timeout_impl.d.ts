@@ -1,12 +1,9 @@
-// C++ exports from TimeoutImpl::createModule(); no JS facade.
+// JavaScript representation of the normalized operations in timeout_impl.hpp.
 declare module "amj:timeout_impl" {
-    /** Schedule a function once. Delay is clamped to [0, 2147483647] milliseconds. */
-    export function setTimeout<Arguments extends unknown[]>(
-        callback: (...args: Arguments) => void,
-        delay?: number,
-        ...args: Arguments
-    ): number;
-
-    /** Cancel a timer. Missing or unknown IDs have no effect. */
-    export function clearTimeout(id?: number): void;
+    export interface TimeoutImpl {
+        /** callback receives no arguments; delay is an integer in [0, 2147483647]. */
+        setTimeout(callback: () => void, delay: number): number;
+        clearTimeout(timerID: number): void;
+    }
+    export const timeoutImpl: TimeoutImpl;
 }

@@ -319,29 +319,21 @@ JSValue URLImpl::serializeQuery(JSContext* jsContext, JSValueConst pairs) try {
     return JS_ThrowInternalError(jsContext, "Unexpected native query serialization failure");
 }
 
-JSValue URLImpl::create(JSContext* jsContext) {
-    JSValueOwner result(jsContext, JS_NewObjectProto(jsContext, nullValue));
-    if (JS_IsException(result.value)) {
-        return exceptionValue;
-    }
-    const std::array<const char*, 4> names = {"parse", "set", "parseQuery", "serializeQuery"};
-    const std::array<int, 4> argumentCounts = {2, 3, 1, 1};
-    for (std::size_t index = 0; index < names.size(); index++) {
-        const JSValue function = JS_NewCFunctionMagic(jsContext, urlOperation, names.at(index), argumentCounts.at(index), JS_CFUNC_generic_magic, static_cast<int>(index));
-        if (JS_IsException(function) || JS_DefinePropertyValueStr(jsContext, result.value, names.at(index), function, JS_PROP_C_W_E) < 0) {
-            return exceptionValue;
-        }
-    }
-    return result.release();
-}
-
 JSModuleDef* URLImpl::createModule(JSContext* jsContext) {
     JSModuleDef* module = JS_NewCModule(jsContext, "amj:url_impl", [](JSContext* jsContext, JSModuleDef* module) -> int {
-        const JSValue urlImpl = URLImpl::create(jsContext);
-        if (JS_IsException(urlImpl)) {
+        JSValueOwner urlImpl(jsContext, JS_NewObjectProto(jsContext, nullValue));
+        if (JS_IsException(urlImpl.value)) {
             return -1;
         }
-        return JS_SetModuleExport(jsContext, module, "urlImpl", urlImpl);
+        const std::array<const char*, 4> names = {"parse", "set", "parseQuery", "serializeQuery"};
+        const std::array<int, 4> argumentCounts = {2, 3, 1, 1};
+        for (std::size_t index = 0; index < names.size(); index++) {
+            const JSValue function = JS_NewCFunctionMagic(jsContext, urlOperation, names.at(index), argumentCounts.at(index), JS_CFUNC_generic_magic, static_cast<int>(index));
+            if (JS_IsException(function) || JS_DefinePropertyValueStr(jsContext, urlImpl.value, names.at(index), function, JS_PROP_C_W_E) < 0) {
+                return -1;
+            }
+        }
+        return JS_SetModuleExport(jsContext, module, "urlImpl", urlImpl.release());
     });
     if (module == nullptr || JS_AddModuleExport(jsContext, module, "urlImpl") < 0) {
         return nullptr;
