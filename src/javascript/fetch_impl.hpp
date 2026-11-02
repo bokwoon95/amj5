@@ -3,11 +3,28 @@
 #include <quickjs.h>
 
 #include <memory>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace amj::javascript {
 
 class Scheduler;
-struct FetchState;
+struct FetchImplState;
+
+// Opaque JS request object returned by start(); its ownership stays in the .cpp.
+struct FetchRequestHandle;
+
+// Plain completion data, converted to JS objects with the same field names.
+struct FetchFailure {
+    std::string type = "";
+    std::string message = "";
+};
+
+struct FetchResponseMetadata {
+    int status = 0;
+    std::vector<std::pair<std::string, std::string>> headers = {};
+};
 
 // Native HTTP operations used by fetch.js. JS owns Promises, abort reasons and
 // listeners, Error/Response objects, and public argument normalization. Native
@@ -17,9 +34,9 @@ class FetchImpl {
   public:
     // url/method: normalized strings; headerPairs: array of two-string arrays;
     // bytes: Uint8Array; onHeaders: function(failureOrNull, metadataOrNull).
-    // Returns an opaque request handle, or JS_EXCEPTION on synchronous failure.
-    // Later invokes onHeaders once through the scheduler. metadata is a plain
-    // {status, headers: [[name, value], ...]}; failure is plain {type, message}.
+    // Returns an opaque FetchRequestHandle JS object, or JS_EXCEPTION on synchronous failure.
+    // Later invokes onHeaders once through the scheduler with FetchFailure/null and
+    // FetchResponseMetadata/null. Header pairs become two-element JS arrays.
     // No native Promise or JS Error is created. 4xx/5xx are successful responses.
     JSValue start(JSContext* jsContext, JSValueConst url, JSValueConst method, JSValueConst headerPairs, JSValueConst bytes, JSValueConst onHeaders);
 
@@ -47,13 +64,13 @@ class FetchImpl {
     // calls may delay cancellation/join: use off the UI thread.
     static JSValue create(JSContext* jsContext, Scheduler& scheduler);
 
-    // Registers amj:fetch, exporting fetchImpl bound to this scheduler.
+    // Registers amj:fetch_impl, exporting fetchImpl bound to this scheduler.
     // Call once per context before loading fetch.js. Returns a context-owned
     // module, or nullptr with a pending exception. Same lifetime rules as create().
     static JSModuleDef* createModule(JSContext* jsContext, Scheduler& scheduler);
 
   private:
-    std::shared_ptr<FetchState> fetchState = nullptr;
+    std::shared_ptr<FetchImplState> fetchImplState = nullptr;
 };
 
 } // namespace amj::javascript

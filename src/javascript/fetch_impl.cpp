@@ -64,11 +64,6 @@ class JSValueOwner {
     }
 };
 
-struct Failure {
-    std::string type = "";
-    std::string message = "";
-};
-
 // Only this native data is accessed by the worker. The owner retains it until
 // stop() joins the worker. Scheduler notifications happen outside this mutex.
 struct Transport {
@@ -80,7 +75,7 @@ struct Transport {
     std::size_t bufferedBytes = 0;
     int status = 0;
     std::vector<std::pair<std::string, std::string>> headers = {};
-    std::optional<Failure> failure = {};
+    std::optional<FetchFailure> failure = {};
     std::exception_ptr workerException = nullptr;
     bool headersReceived = false;
     bool finished = false;
@@ -99,7 +94,7 @@ struct Transport {
                 return true;
             }
             if (response.status == 301 || response.status == 302 || response.status == 303 || response.status == 307 || response.status == 308) {
-                failure = Failure{
+                failure = FetchFailure{
                     .type = "RedirectRejected",
                     .message = "HTTP redirect rejected",
                 };
@@ -109,7 +104,7 @@ struct Transport {
             for (const httplib::Headers::value_type& header : response.headers) {
                 for (const std::string* field : {&header.first, &header.second}) {
                     if (field->size() > headerLimit - bytes) {
-                        failure = Failure{
+                        failure = FetchFailure{
                             .type = "LimitExceeded",
                             .message = "HTTP response headers exceed 64 KiB",
                         };
@@ -181,7 +176,7 @@ struct Transport {
                     } else {
                         const std::lock_guard<std::mutex> lock(mutex);
                         if (!failure.has_value() && !canceled) {
-                            failure = Failure{
+                            failure = FetchFailure{
                                 .type = "TransportError",
                                 .message = "HTTP transport failed: " + httplib::to_string(result.error()),
                             };
@@ -249,7 +244,7 @@ struct Transport {
 
 } // namespace
 
-struct RequestState {
+struct FetchRequestState {
     JSContext* jsContext = nullptr;
     int64_t requestID = 0;
     int64_t headersID = 0;
@@ -259,26 +254,26 @@ struct RequestState {
     JSValue onRead = undefinedValue;
     bool headersDelivered = false;
     bool closed = false;
-    ~RequestState() {
+    ~FetchRequestState() {
         JS_FreeValue(jsContext, onHeaders);
         JS_FreeValue(jsContext, onRead);
     }
 };
 
-struct FetchState {
+struct FetchImplState {
     JSContext* jsContext = nullptr;
     Scheduler* scheduler = nullptr;
-    std::map<int64_t, std::shared_ptr<RequestState>> requests = {};
+    std::map<int64_t, std::shared_ptr<FetchRequestState>> requests = {};
     int64_t lastRequestID = 0;
     bool active = false;
 };
 
 namespace {
 
-struct NativeHandle {
+struct FetchHandle {
     std::unique_ptr<FetchImpl> fetchImpl = nullptr;
-    std::weak_ptr<FetchState> owner = {};
-    std::weak_ptr<RequestState> requestState = {};
+    std::weak_ptr<FetchImplState> owner = {};
+    std::weak_ptr<FetchRequestState> fetchRequestState = {};
 };
 std::mutex classIDMutex = {};
 std::map<JSRuntime*, JSClassID> classIDMap = {}; // NOLINT(bugprone-throwing-static-initialization): startup allocation failure may terminate.
@@ -304,87 +299,86 @@ JSClassID getClassID(JSRuntime* jsRuntime) {
 }
 
 void finalizeHandle(JSRuntime* /* jsRuntime */, JSValue value) {
-    const std::unique_ptr<NativeHandle> nativeHandle(static_cast<NativeHandle*>(JS_GetOpaque(value, JS_GetClassID(value))));
+    const std::unique_ptr<FetchHandle> fetchHandle(static_cast<FetchHandle*>(JS_GetOpaque(value, JS_GetClassID(value))));
 }
 
-std::shared_ptr<RequestState> getRequest(JSContext* jsContext, JSValueConst handle, const std::shared_ptr<FetchState>& fetchState) {
-    const NativeHandle* nativeHandle = static_cast<NativeHandle*>(JS_GetOpaque2(jsContext, handle, getClassID(JS_GetRuntime(jsContext))));
-    if (nativeHandle == nullptr) {
+std::shared_ptr<FetchRequestState> getRequest(JSContext* jsContext, JSValueConst handle, const std::shared_ptr<FetchImplState>& fetchImplState) {
+    const FetchHandle* fetchHandle = static_cast<FetchHandle*>(JS_GetOpaque2(jsContext, handle, getClassID(JS_GetRuntime(jsContext))));
+    if (fetchHandle == nullptr) {
         return nullptr;
     }
-    if (nativeHandle->fetchImpl != nullptr || nativeHandle->owner.lock() != fetchState) {
+    if (fetchHandle->fetchImpl != nullptr || fetchHandle->owner.lock() != fetchImplState) {
         JS_ThrowTypeError(jsContext, "Request belongs to a different native Fetch instance");
         return nullptr;
     }
-    return nativeHandle->requestState.lock();
+    return fetchHandle->fetchRequestState.lock();
 }
 
-void closeRequest(const std::shared_ptr<RequestState>& requestState, const std::shared_ptr<FetchState>& fetchState) {
-    if (requestState->closed) {
+void closeRequest(const std::shared_ptr<FetchRequestState>& fetchRequestState, const std::shared_ptr<FetchImplState>& fetchImplState) {
+    if (fetchRequestState->closed) {
         return;
     }
-    requestState->closed = true;
-    const errors::Error headersError = fetchState->scheduler->unregisterCallback(requestState->headersID);
-    const errors::Error readError = fetchState->scheduler->unregisterCallback(requestState->readID);
+    fetchRequestState->closed = true;
+    const errors::Error headersError = fetchImplState->scheduler->unregisterCallback(fetchRequestState->headersID);
+    const errors::Error readError = fetchImplState->scheduler->unregisterCallback(fetchRequestState->readID);
     if (headersError.errorCode || readError.errorCode) {
         throw std::runtime_error("Could not unregister HTTP callbacks");
     }
-    requestState->transport->stop();
-    JS_FreeValue(requestState->jsContext, std::exchange(requestState->onHeaders, undefinedValue));
-    JS_FreeValue(requestState->jsContext, std::exchange(requestState->onRead, undefinedValue));
-    fetchState->requests.erase(requestState->requestID);
+    fetchRequestState->transport->stop();
+    JS_FreeValue(fetchRequestState->jsContext, std::exchange(fetchRequestState->onHeaders, undefinedValue));
+    JS_FreeValue(fetchRequestState->jsContext, std::exchange(fetchRequestState->onRead, undefinedValue));
+    fetchImplState->requests.erase(fetchRequestState->requestID);
 }
 
 // Converts native completion data only. JS creates Errors and settles Promises.
-errors::Error deliver(const std::shared_ptr<RequestState>& requestState, bool reading) {
-    if (requestState->closed) {
+errors::Error deliver(const std::shared_ptr<FetchRequestState>& fetchRequestState, bool reading) {
+    if (fetchRequestState->closed) {
         return {};
     }
-    std::optional<Failure> failure;
-    int status = 0;
-    std::vector<std::pair<std::string, std::string>> headers;
+    std::optional<FetchFailure> failure;
+    FetchResponseMetadata metadata;
     std::vector<unsigned char> chunk;
     bool done = false;
     {
-        const std::lock_guard<std::mutex> lock(requestState->transport->mutex);
-        if (requestState->transport->workerException != nullptr) {
-            std::rethrow_exception(requestState->transport->workerException);
+        const std::lock_guard<std::mutex> lock(fetchRequestState->transport->mutex);
+        if (fetchRequestState->transport->workerException != nullptr) {
+            std::rethrow_exception(fetchRequestState->transport->workerException);
         }
         if (reading) {
-            requestState->transport->readID = 0;
-            if (!requestState->transport->chunks.empty()) {
-                chunk = requestState->transport->chunks.front();
-                requestState->transport->chunks.pop_front();
-                requestState->transport->bufferedBytes -= chunk.size();
-            } else if (requestState->transport->finished) {
-                failure = requestState->transport->failure;
+            fetchRequestState->transport->readID = 0;
+            if (!fetchRequestState->transport->chunks.empty()) {
+                chunk = fetchRequestState->transport->chunks.front();
+                fetchRequestState->transport->chunks.pop_front();
+                fetchRequestState->transport->bufferedBytes -= chunk.size();
+            } else if (fetchRequestState->transport->finished) {
+                failure = fetchRequestState->transport->failure;
                 done = true;
             } else {
                 throw std::logic_error("HTTP read notified without data or completion");
             }
-        } else if (requestState->transport->headersReceived) {
-            status = requestState->transport->status;
-            headers = requestState->transport->headers;
+        } else if (fetchRequestState->transport->headersReceived) {
+            metadata.status = fetchRequestState->transport->status;
+            metadata.headers = fetchRequestState->transport->headers;
         } else {
-            failure = requestState->transport->failure;
+            failure = fetchRequestState->transport->failure;
             if (!failure.has_value()) {
-                failure = Failure{
+                failure = FetchFailure{
                     .type = "TransportError",
                     .message = "HTTP request ended before response headers",
                 };
             }
         }
     }
-    requestState->transport->condition.notify_all();
-    JSContext* jsContext = requestState->jsContext;
+    fetchRequestState->transport->condition.notify_all();
+    JSContext* jsContext = fetchRequestState->jsContext;
     JSValueOwner callback(jsContext, undefinedValue);
     if (reading) {
-        requestState->readID = 0;
-        callback.value = std::exchange(requestState->onRead, undefinedValue);
+        fetchRequestState->readID = 0;
+        callback.value = std::exchange(fetchRequestState->onRead, undefinedValue);
     } else {
-        requestState->headersID = 0;
-        requestState->headersDelivered = !failure.has_value();
-        callback.value = std::exchange(requestState->onHeaders, undefinedValue);
+        fetchRequestState->headersID = 0;
+        fetchRequestState->headersDelivered = !failure.has_value();
+        callback.value = std::exchange(fetchRequestState->onHeaders, undefinedValue);
     }
     if (JS_IsUndefined(callback.value)) {
         return {};
@@ -414,7 +408,7 @@ errors::Error deliver(const std::shared_ptr<RequestState>& requestState, bool re
         JSValueOwner pairs(jsContext, JS_NewArray(jsContext));
         if (!JS_IsException(data.value) && !JS_IsException(pairs.value)) {
             uint32_t index = 0;
-            for (const std::pair<std::string, std::string>& header : headers) {
+            for (const std::pair<std::string, std::string>& header : metadata.headers) {
                 JSValueOwner pair(jsContext, JS_NewArray(jsContext));
                 if (JS_IsException(pair.value)) {
                     break;
@@ -432,7 +426,7 @@ errors::Error deliver(const std::shared_ptr<RequestState>& requestState, bool re
                 }
                 index++;
             }
-            if (!JS_HasException(jsContext) && JS_DefinePropertyValueStr(jsContext, data.value, "status", JS_NewInt32(jsContext, status), JS_PROP_C_W_E) >= 0) {
+            if (!JS_HasException(jsContext) && JS_DefinePropertyValueStr(jsContext, data.value, "status", JS_NewInt32(jsContext, metadata.status), JS_PROP_C_W_E) >= 0) {
                 JS_DefinePropertyValueStr(jsContext, data.value, "headers", pairs.release(), JS_PROP_C_W_E);
             }
         }
@@ -491,18 +485,18 @@ bool isToken(const std::string& text) {
 }
 
 JSValue fetchOperation(JSContext* jsContext, JSValueConst /* thisValue */, int argc, JSValueConst* argv, int operation, JSValueConst* functionData) {
-    const NativeHandle* nativeHandle = static_cast<NativeHandle*>(JS_GetOpaque(functionData[0], JS_GetClassID(functionData[0])));
-    if (nativeHandle == nullptr || nativeHandle->fetchImpl == nullptr) {
+    const FetchHandle* fetchHandle = static_cast<FetchHandle*>(JS_GetOpaque(functionData[0], JS_GetClassID(functionData[0])));
+    if (fetchHandle == nullptr || fetchHandle->fetchImpl == nullptr) {
         return JS_ThrowInternalError(jsContext, "Missing native Fetch instance");
     }
     if (operation == 0 && argc >= 5) {
-        return nativeHandle->fetchImpl->start(jsContext, argv[0], argv[1], argv[2], argv[3], argv[4]);
+        return fetchHandle->fetchImpl->start(jsContext, argv[0], argv[1], argv[2], argv[3], argv[4]);
     }
     if (operation == 1 && argc >= 2) {
-        return nativeHandle->fetchImpl->read(jsContext, argv[0], argv[1]);
+        return fetchHandle->fetchImpl->read(jsContext, argv[0], argv[1]);
     }
     if (operation == 2 && argc >= 1) {
-        return nativeHandle->fetchImpl->close(jsContext, argv[0]);
+        return fetchHandle->fetchImpl->close(jsContext, argv[0]);
     }
     return JS_ThrowTypeError(jsContext, "Missing native Fetch arguments");
 }
@@ -510,7 +504,7 @@ JSValue fetchOperation(JSContext* jsContext, JSValueConst /* thisValue */, int a
 } // namespace
 
 JSValue FetchImpl::start(JSContext* jsContext, JSValueConst url, JSValueConst method, JSValueConst headerPairs, JSValueConst bytes, JSValueConst onHeaders) try {
-    if (fetchState == nullptr || !fetchState->active || fetchState->jsContext != jsContext) {
+    if (fetchImplState == nullptr || !fetchImplState->active || fetchImplState->jsContext != jsContext) {
         return JS_ThrowInternalError(jsContext, "Native Fetch instance is inactive or belongs to another context");
     }
     if (!JS_IsFunction(jsContext, onHeaders)) {
@@ -623,20 +617,20 @@ JSValue FetchImpl::start(JSContext* jsContext, JSValueConst url, JSValueConst me
         request.body.assign(data + offset, data + offset + length);
     }
     // Property getters above can reenter JS and clear/start requests.
-    if (!fetchState->active) {
+    if (!fetchImplState->active) {
         return JS_ThrowInternalError(jsContext, "Native Fetch instance was cleared");
     }
-    if (fetchState->requests.size() >= 64 || fetchState->lastRequestID == std::numeric_limits<int64_t>::max()) {
+    if (fetchImplState->requests.size() >= 64 || fetchImplState->lastRequestID == std::numeric_limits<int64_t>::max()) {
         return JS_ThrowRangeError(jsContext, "HTTP request limit or IDs exhausted");
     }
-    const std::shared_ptr<RequestState> requestState = std::make_shared<RequestState>();
-    requestState->jsContext = jsContext;
-    requestState->requestID = ++fetchState->lastRequestID;
-    requestState->onHeaders = JS_DupValue(jsContext, onHeaders);
-    requestState->transport = std::make_unique<Transport>();
-    requestState->transport->scheduler = fetchState->scheduler;
-    requestState->transport->client = std::make_unique<httplib::Client>(parsed.value().get_origin());
-    httplib::Client& client = *requestState->transport->client;
+    const std::shared_ptr<FetchRequestState> fetchRequestState = std::make_shared<FetchRequestState>();
+    fetchRequestState->jsContext = jsContext;
+    fetchRequestState->requestID = ++fetchImplState->lastRequestID;
+    fetchRequestState->onHeaders = JS_DupValue(jsContext, onHeaders);
+    fetchRequestState->transport = std::make_unique<Transport>();
+    fetchRequestState->transport->scheduler = fetchImplState->scheduler;
+    fetchRequestState->transport->client = std::make_unique<httplib::Client>(parsed.value().get_origin());
+    httplib::Client& client = *fetchRequestState->transport->client;
     if (!client.is_valid()) {
         return JS_ThrowTypeError(jsContext, "Invalid HTTP origin or unavailable TLS backend");
     }
@@ -653,29 +647,29 @@ JSValue FetchImpl::start(JSContext* jsContext, JSValueConst url, JSValueConst me
     if (JS_IsException(handle.value)) {
         return exceptionValue;
     }
-    std::unique_ptr<NativeHandle> nativeHandle = std::make_unique<NativeHandle>();
-    nativeHandle->owner = fetchState;
-    nativeHandle->requestState = requestState;
-    JS_SetOpaque(handle.value, nativeHandle.release());
+    std::unique_ptr<FetchHandle> fetchHandle = std::make_unique<FetchHandle>();
+    fetchHandle->owner = fetchImplState;
+    fetchHandle->fetchRequestState = fetchRequestState;
+    JS_SetOpaque(handle.value, fetchHandle.release());
     try {
-        fetchState->requests.insert_or_assign(requestState->requestID, requestState);
-        const std::weak_ptr<RequestState> weakRequestState = requestState;
-        const std::expected<int64_t, errors::Error> callbackIDResult = fetchState->scheduler->registerCallback([weakRequestState]() -> errors::Error {
-            const std::shared_ptr<RequestState> requestState = weakRequestState.lock();
-            if (requestState == nullptr) {
+        fetchImplState->requests.insert_or_assign(fetchRequestState->requestID, fetchRequestState);
+        const std::weak_ptr<FetchRequestState> weakFetchRequestState = fetchRequestState;
+        const std::expected<int64_t, errors::Error> callbackIDResult = fetchImplState->scheduler->registerCallback([weakFetchRequestState]() -> errors::Error {
+            const std::shared_ptr<FetchRequestState> fetchRequestState = weakFetchRequestState.lock();
+            if (fetchRequestState == nullptr) {
                 return {};
             }
-            return deliver(requestState, false);
+            return deliver(fetchRequestState, false);
         },
                                                                                                                std::nullopt);
         if (!callbackIDResult.has_value()) {
             throw std::runtime_error(callbackIDResult.error().toString());
         }
-        requestState->headersID = callbackIDResult.value();
-        requestState->transport->headersID = requestState->headersID;
-        requestState->transport->start(request);
+        fetchRequestState->headersID = callbackIDResult.value();
+        fetchRequestState->transport->headersID = fetchRequestState->headersID;
+        fetchRequestState->transport->start(request);
     } catch (...) {
-        closeRequest(requestState, fetchState);
+        closeRequest(fetchRequestState, fetchImplState);
         throw;
     }
     return JS_DupValue(jsContext, handle.value);
@@ -694,55 +688,55 @@ JSValue FetchImpl::start(JSContext* jsContext, JSValueConst url, JSValueConst me
 }
 
 JSValue FetchImpl::read(JSContext* jsContext, JSValueConst request, JSValueConst onRead) try {
-    if (fetchState == nullptr || !fetchState->active || fetchState->jsContext != jsContext) {
+    if (fetchImplState == nullptr || !fetchImplState->active || fetchImplState->jsContext != jsContext) {
         return JS_ThrowInternalError(jsContext, "Native Fetch instance is inactive or belongs to another context");
     }
-    const std::shared_ptr<RequestState> requestState = getRequest(jsContext, request, fetchState);
-    if (requestState == nullptr) {
+    const std::shared_ptr<FetchRequestState> fetchRequestState = getRequest(jsContext, request, fetchImplState);
+    if (fetchRequestState == nullptr) {
         if (JS_HasException(jsContext)) {
             return exceptionValue;
         }
         return JS_ThrowTypeError(jsContext, "HTTP request is closed");
     }
-    if (requestState->closed || !requestState->headersDelivered || !JS_IsUndefined(requestState->onRead)) {
+    if (fetchRequestState->closed || !fetchRequestState->headersDelivered || !JS_IsUndefined(fetchRequestState->onRead)) {
         return JS_ThrowTypeError(jsContext, "HTTP read requires headers and no outstanding read");
     }
     if (!JS_IsFunction(jsContext, onRead)) {
         return JS_ThrowTypeError(jsContext, "Read completion must be a function");
     }
-    requestState->onRead = JS_DupValue(jsContext, onRead);
+    fetchRequestState->onRead = JS_DupValue(jsContext, onRead);
     try {
-        const std::weak_ptr<RequestState> weakRequestState = requestState;
-        const std::expected<int64_t, errors::Error> callbackIDResult = fetchState->scheduler->registerCallback([weakRequestState]() -> errors::Error {
-            const std::shared_ptr<RequestState> requestState = weakRequestState.lock();
-            if (requestState == nullptr) {
+        const std::weak_ptr<FetchRequestState> weakFetchRequestState = fetchRequestState;
+        const std::expected<int64_t, errors::Error> callbackIDResult = fetchImplState->scheduler->registerCallback([weakFetchRequestState]() -> errors::Error {
+            const std::shared_ptr<FetchRequestState> fetchRequestState = weakFetchRequestState.lock();
+            if (fetchRequestState == nullptr) {
                 return {};
             }
-            return deliver(requestState, true);
+            return deliver(fetchRequestState, true);
         },
                                                                                                                std::nullopt);
         if (!callbackIDResult.has_value()) {
             throw std::runtime_error(callbackIDResult.error().toString());
         }
-        requestState->readID = callbackIDResult.value();
+        fetchRequestState->readID = callbackIDResult.value();
         bool ready = false;
         {
-            const std::lock_guard<std::mutex> lock(requestState->transport->mutex);
-            requestState->transport->readID = requestState->readID;
-            ready = !requestState->transport->chunks.empty() || requestState->transport->finished;
+            const std::lock_guard<std::mutex> lock(fetchRequestState->transport->mutex);
+            fetchRequestState->transport->readID = fetchRequestState->readID;
+            ready = !fetchRequestState->transport->chunks.empty() || fetchRequestState->transport->finished;
         }
         if (ready) {
-            const errors::Error error = fetchState->scheduler->markReady(requestState->readID);
+            const errors::Error error = fetchImplState->scheduler->markReady(fetchRequestState->readID);
             if (error.errorCode) {
                 throw std::runtime_error(error.toString());
             }
         }
     } catch (...) {
-        const errors::Error error = fetchState->scheduler->unregisterCallback(requestState->readID);
+        const errors::Error error = fetchImplState->scheduler->unregisterCallback(fetchRequestState->readID);
         if (error.errorCode) {
             std::terminate();
         }
-        JS_FreeValue(jsContext, std::exchange(requestState->onRead, undefinedValue));
+        JS_FreeValue(jsContext, std::exchange(fetchRequestState->onRead, undefinedValue));
         throw;
     }
     return undefinedValue;
@@ -761,18 +755,18 @@ JSValue FetchImpl::read(JSContext* jsContext, JSValueConst request, JSValueConst
 }
 
 JSValue FetchImpl::close(JSContext* jsContext, JSValueConst request) try {
-    if (fetchState == nullptr || fetchState->jsContext != jsContext) {
+    if (fetchImplState == nullptr || fetchImplState->jsContext != jsContext) {
         return JS_ThrowTypeError(jsContext, "Native Fetch belongs to another context");
     }
-    const std::shared_ptr<RequestState> requestState = getRequest(jsContext, request, fetchState);
-    if (requestState == nullptr) {
+    const std::shared_ptr<FetchRequestState> fetchRequestState = getRequest(jsContext, request, fetchImplState);
+    if (fetchRequestState == nullptr) {
         if (JS_HasException(jsContext)) {
             return exceptionValue;
         }
         return undefinedValue;
     }
-    if (fetchState->active) {
-        closeRequest(requestState, fetchState);
+    if (fetchImplState->active) {
+        closeRequest(fetchRequestState, fetchImplState);
     }
     return undefinedValue;
 } catch (const std::bad_alloc&) {
@@ -804,17 +798,17 @@ JSValue FetchImpl::create(JSContext* jsContext, Scheduler& scheduler) try {
             return JS_ThrowOutOfMemory(jsContext);
         }
     }
-    const std::shared_ptr<FetchState> fetchState = std::make_shared<FetchState>();
-    fetchState->jsContext = jsContext;
-    fetchState->scheduler = &scheduler;
-    std::unique_ptr<NativeHandle> nativeHandle = std::make_unique<NativeHandle>();
-    nativeHandle->fetchImpl = std::make_unique<FetchImpl>();
-    nativeHandle->fetchImpl->fetchState = fetchState;
+    const std::shared_ptr<FetchImplState> fetchImplState = std::make_shared<FetchImplState>();
+    fetchImplState->jsContext = jsContext;
+    fetchImplState->scheduler = &scheduler;
+    std::unique_ptr<FetchHandle> fetchHandle = std::make_unique<FetchHandle>();
+    fetchHandle->fetchImpl = std::make_unique<FetchImpl>();
+    fetchHandle->fetchImpl->fetchImplState = fetchImplState;
     JSValueOwner object(jsContext, JS_NewObjectProtoClass(jsContext, nullValue, classID));
     if (JS_IsException(object.value)) {
         return exceptionValue;
     }
-    JS_SetOpaque(object.value, nativeHandle.release());
+    JS_SetOpaque(object.value, fetchHandle.release());
     const std::array<const char*, 3> names = {"start", "read", "close"};
     const std::array<int, 3> argumentCounts = {5, 2, 1};
     for (std::size_t index = 0; index < names.size(); index++) {
@@ -824,14 +818,14 @@ JSValue FetchImpl::create(JSContext* jsContext, Scheduler& scheduler) try {
             return exceptionValue;
         }
     }
-    const std::expected<int64_t, errors::Error> cleanupIDResult = scheduler.registerCleanup([fetchState]() -> errors::Error {
-        fetchState->active = false;
-        std::map<int64_t, std::shared_ptr<RequestState>> requests;
-        requests.swap(fetchState->requests);
+    const std::expected<int64_t, errors::Error> cleanupIDResult = scheduler.registerCleanup([fetchImplState]() -> errors::Error {
+        fetchImplState->active = false;
+        std::map<int64_t, std::shared_ptr<FetchRequestState>> requests;
+        requests.swap(fetchImplState->requests);
         errors::Error firstError;
-        for (const std::pair<const int64_t, std::shared_ptr<RequestState>>& entry : requests) {
+        for (const std::pair<const int64_t, std::shared_ptr<FetchRequestState>>& entry : requests) {
             try {
-                closeRequest(entry.second, fetchState);
+                closeRequest(entry.second, fetchImplState);
             } catch (const std::exception& exception) {
                 if (!firstError.errorCode) {
                     firstError = errors::message(exception.what());
@@ -847,7 +841,7 @@ JSValue FetchImpl::create(JSContext* jsContext, Scheduler& scheduler) try {
     if (!cleanupIDResult.has_value()) {
         return JS_ThrowInternalError(jsContext, "%s", cleanupIDResult.error().toString().c_str());
     }
-    fetchState->active = true;
+    fetchImplState->active = true;
     return object.release();
 } catch (const std::bad_alloc&) {
     return JS_ThrowOutOfMemory(jsContext);
@@ -868,7 +862,7 @@ JSModuleDef* FetchImpl::createModule(JSContext* jsContext, Scheduler& scheduler)
     if (JS_IsException(fetchImpl.value)) {
         return nullptr;
     }
-    JSModuleDef* module = JS_NewCModule(jsContext, "amj:fetch", [](JSContext* jsContext, JSModuleDef* module) -> int {
+    JSModuleDef* module = JS_NewCModule(jsContext, "amj:fetch_impl", [](JSContext* jsContext, JSModuleDef* module) -> int {
         const JSValue fetchImpl = JS_GetModulePrivateValue(jsContext, module);
         if (JS_IsException(fetchImpl)) {
             return -1;

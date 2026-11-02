@@ -1,6 +1,5 @@
-// C++ contract from url_impl.hpp; no JavaScript implementation exists for this module.
-declare module "amj:url" {
-    export type QueryPair = [string, string];
+// JavaScript representation of the boundary types and operations in url_impl.hpp.
+declare module "amj:url_impl" {
     export type URLComponent = "href" | "protocol" | "username" | "password" | "host" | "hostname" | "port" | "pathname" | "search" | "hash";
     export interface URLParts {
         href: string;
@@ -18,14 +17,8 @@ declare module "amj:url" {
     export interface URLImpl {
         parse(input: string, baseOrNull: string | null): URLParts | null;
         set(href: string, component: URLComponent, value: string): URLParts | null;
-        parseQuery(query: string): QueryPair[];
-        serializeQuery(pairs: QueryPair[]): string;
+        parseQuery(query: string): [string, string][];
+        serializeQuery(pairs: [string, string][]): string;
     }
     export const urlImpl: URLImpl;
 }
-
-// The host installs these JS exports as globals for user scripts.
-declare var URL: typeof import("./url.js").URL;
-type URL = import("./url.js").URL;
-declare var URLSearchParams: typeof import("./url.js").URLSearchParams;
-type URLSearchParams = import("./url.js").URLSearchParams;

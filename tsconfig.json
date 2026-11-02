@@ -10,14 +10,19 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "lib": ["ES2023"],
-    "types": []
+    "types": [],
+    "paths": {
+      "amj:text": ["./src/javascript/text.js"],
+      "amj:url": ["./src/javascript/url.js"],
+      "amj:fetch": ["./src/javascript/fetch.js"]
+    }
   },
   "files": [
-    "src/javascript/text_globals.d.ts",
+    "src/javascript/global.d.ts",
     "src/javascript/url_impl.d.ts",
-    "src/javascript/timeout.d.ts",
+    "src/javascript/timeout_impl.d.ts",
     "src/javascript/fetch_impl.d.ts"
   ],
   "include": ["**/*.js"],
-  "exclude": ["src/javascript", "build", "dist", "vcpkg_installed", "node_modules", ".venv"]
+  "exclude": ["build", "dist", "vcpkg_installed", "node_modules", ".venv"]
 }

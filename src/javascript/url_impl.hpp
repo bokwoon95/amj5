@@ -2,7 +2,39 @@
 
 #include <quickjs.h>
 
+#include <cstdint>
+#include <string>
+
 namespace amj::javascript {
+
+// Component strings accepted by set(), represented as an enum inside C++.
+enum class URLComponent : std::uint8_t {
+    Href,
+    Protocol,
+    Username,
+    Password,
+    Host,
+    Hostname,
+    Port,
+    Pathname,
+    Search,
+    Hash,
+};
+
+// Plain snapshot converted to a JS object with these same string fields.
+struct URLParts {
+    std::string href = "";
+    std::string origin = "";
+    std::string protocol = "";
+    std::string username = "";
+    std::string password = "";
+    std::string host = "";
+    std::string hostname = "";
+    std::string port = "";
+    std::string pathname = "";
+    std::string search = "";
+    std::string hash = "";
+};
 
 // Stateless Ada operations used by url.js. These methods accept already-coerced
 // scalar-value strings: JS owns constructors, argument coercion, URLSearchParams
@@ -13,13 +45,12 @@ namespace amj::javascript {
 class URLImpl {
   public:
     // input: string; baseOrNull: string or null. Invalid URLs/bases return null.
-    // Otherwise returns a plain snapshot with string fields:
-    // href, origin, protocol, username, password, host, hostname, port,
-    // pathname, search, hash. search/hash include their leading ?/# when present.
+    // Otherwise returns URLParts as a plain JS object.
+    // search/hash include their leading ?/# when present.
     static JSValue parse(JSContext* jsContext, JSValueConst input, JSValueConst baseOrNull);
 
-    // href/component/value: strings. component is href, protocol, username,
-    // password, host, hostname, port, pathname, search, or hash.
+    // href/component/value: strings. component is a URLComponent string:
+    // href, protocol, username, password, host, hostname, port, pathname, search, hash.
     // Returns an updated snapshot with the same shape as parse(), or null if
     // Ada rejects the URL/change. JS decides whether rejection throws or is ignored.
     static JSValue set(JSContext* jsContext, JSValueConst href, JSValueConst component, JSValueConst value);
@@ -37,7 +68,7 @@ class URLImpl {
     // Used by createModule(). No public URL classes live in C++.
     static JSValue create(JSContext* jsContext);
 
-    // Registers amj:url, exporting urlImpl. Call once per context before loading
+    // Registers amj:url_impl, exporting urlImpl. Call once per context before loading
     // url.js. Returns a context-owned module, or nullptr with a pending exception.
     static JSModuleDef* createModule(JSContext* jsContext);
 };

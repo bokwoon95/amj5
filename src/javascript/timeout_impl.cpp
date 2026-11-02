@@ -1,4 +1,4 @@
-#include "timeout.hpp"
+#include "timeout_impl.hpp"
 
 #include "errors/errors.hpp"
 #include "scheduler.hpp"
@@ -191,11 +191,7 @@ JSValue timeoutOperation(JSContext* jsContext, JSValueConst /* thisValue */, int
 
 } // namespace
 
-int installTimeout(JSContext* jsContext, JSValueConst target, Scheduler& scheduler) try {
-    if (!JS_IsObject(target)) {
-        JS_ThrowTypeError(jsContext, "Timers require an object target");
-        return -1;
-    }
+JSValue TimeoutImpl::create(JSContext* jsContext, Scheduler& scheduler) try {
     JSRuntime* jsRuntime = JS_GetRuntime(jsContext);
     JSClassID timeoutClassID = 0;
     {
@@ -220,8 +216,7 @@ int installTimeout(JSContext* jsContext, JSValueConst target, Scheduler& schedul
             .exotic = nullptr,
         };
         if (JS_NewClass(jsRuntime, timeoutClassID, &definition) < 0) {
-            JS_ThrowOutOfMemory(jsContext);
-            return -1;
+            return JS_ThrowOutOfMemory(jsContext);
         }
     }
     const std::shared_ptr<TimeoutBinding> timeoutBinding = std::make_shared<TimeoutBinding>();
@@ -230,13 +225,18 @@ int installTimeout(JSContext* jsContext, JSValueConst target, Scheduler& schedul
     timeoutHolder->timeoutBinding = timeoutBinding;
     const JSValue object = JS_NewObjectProtoClass(jsContext, nullValue, timeoutClassID);
     if (JS_IsException(object)) {
-        return -1;
+        return exceptionValue;
     }
     const auto releaseObject = [jsContext](const JSValue* value) {
         JS_FreeValue(jsContext, *value);
     };
     const std::unique_ptr<const JSValue, decltype(releaseObject)> ownedObject(&object, releaseObject);
     JS_SetOpaque(object, timeoutHolder.release());
+    const JSValue target = JS_NewObjectProto(jsContext, nullValue);
+    if (JS_IsException(target)) {
+        return exceptionValue;
+    }
+    const std::unique_ptr<const JSValue, decltype(releaseObject)> ownedTarget(&target, releaseObject);
     const std::expected<int64_t, errors::Error> cleanupIDResult = scheduler.registerCleanup([timeoutBinding]() -> errors::Error {
         timeoutBinding->active = false;
         errors::Error firstError;
@@ -251,7 +251,7 @@ int installTimeout(JSContext* jsContext, JSValueConst target, Scheduler& schedul
     });
     if (!cleanupIDResult.has_value()) {
         JS_ThrowInternalError(jsContext, "%s", cleanupIDResult.error().toString().c_str());
-        return -1;
+        return exceptionValue;
     }
     timeoutBinding->active = true;
     try {
@@ -264,7 +264,7 @@ int installTimeout(JSContext* jsContext, JSValueConst target, Scheduler& schedul
                 if (error.errorCode) {
                     throw std::runtime_error(error.toString());
                 }
-                return -1;
+                return exceptionValue;
             }
         }
     } catch (...) {
@@ -275,23 +275,56 @@ int installTimeout(JSContext* jsContext, JSValueConst target, Scheduler& schedul
         throw;
     }
     if (!timeoutBinding->active) {
-        JS_ThrowInternalError(jsContext, "Timer binding was cleared during installation");
-        return -1;
+        return JS_ThrowInternalError(jsContext, "Timer binding was cleared during creation");
     }
-    return 0;
+    return JS_DupValue(jsContext, target);
 } catch (const std::bad_alloc&) {
-    JS_ThrowOutOfMemory(jsContext);
-    return -1;
+    return JS_ThrowOutOfMemory(jsContext);
 } catch (const std::exception& exception) {
     if (!JS_HasException(jsContext)) {
         JS_ThrowInternalError(jsContext, "%s", exception.what());
     }
-    return -1;
+    return exceptionValue;
 } catch (...) {
     if (!JS_HasException(jsContext)) {
-        JS_ThrowInternalError(jsContext, "Unexpected timer installation failure");
+        JS_ThrowInternalError(jsContext, "Unexpected timer creation failure");
     }
-    return -1;
+    return exceptionValue;
+}
+
+JSModuleDef* TimeoutImpl::createModule(JSContext* jsContext, Scheduler& scheduler) {
+    const JSValue exports = TimeoutImpl::create(jsContext, scheduler);
+    if (JS_IsException(exports)) {
+        return nullptr;
+    }
+    JSModuleDef* module = JS_NewCModule(jsContext, "amj:timeout_impl", [](JSContext* jsContext, JSModuleDef* module) -> int {
+        const JSValue exports = JS_GetModulePrivateValue(jsContext, module);
+        if (JS_IsException(exports)) {
+            return -1;
+        }
+        const std::array<const char*, 2> names = {"setTimeout", "clearTimeout"};
+        for (const char* name : names) {
+            const JSValue function = JS_GetPropertyStr(jsContext, exports, name);
+            if (JS_IsException(function) || JS_SetModuleExport(jsContext, module, name, function) < 0) {
+                JS_FreeValue(jsContext, exports);
+                return -1;
+            }
+        }
+        JS_FreeValue(jsContext, exports);
+        return 0;
+    });
+    if (module == nullptr) {
+        JS_FreeValue(jsContext, exports);
+        return nullptr;
+    }
+    if (JS_AddModuleExport(jsContext, module, "setTimeout") < 0 || JS_AddModuleExport(jsContext, module, "clearTimeout") < 0) {
+        JS_FreeValue(jsContext, exports);
+        return nullptr;
+    }
+    if (JS_SetModulePrivateValue(jsContext, module, exports) < 0) {
+        return nullptr;
+    }
+    return module;
 }
 
 } // namespace amj::javascript

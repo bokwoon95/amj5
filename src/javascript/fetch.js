@@ -2,14 +2,13 @@
 // Fetch over FetchImpl::{start,read,close}. JS owns Promises and API semantics.
 // Dependencies are module imports, never target/global lookups.
 
-import { fetchImpl } from "amj:fetch";
-import { URL } from "./url.js";
-import { TextEncoder,TextDecoder } from "./text.js";
+import { fetchImpl } from "amj:fetch_impl";
+import { URL } from "amj:url";
+import { TextEncoder, TextDecoder } from "amj:text";
 
-/** @typedef {import("amj:fetch").HeaderPair} HeaderPair */
-/** @typedef {import("amj:fetch").NativeRequest} NativeRequest */
-/** @typedef {import("amj:fetch").NativeFailure} NativeFailure */
-/** @typedef {import("amj:fetch").ResponseMetadata} ResponseMetadata */
+/** @typedef {import("amj:fetch_impl").FetchRequestHandle} FetchRequestHandle */
+/** @typedef {import("amj:fetch_impl").FetchFailure} FetchFailure */
+/** @typedef {import("amj:fetch_impl").FetchResponseMetadata} FetchResponseMetadata */
 /**
  * @template T
  * @typedef {object} Pending
@@ -58,7 +57,7 @@ const normalizeValue=(value) => {
     if(/[\x00-\x08\x0a-\x1f\x7f]/.test(text)) throw new TypeError("Invalid header value");
     return text.replace(/^[\t ]+|[\t ]+$/g,"");
 };
-/** @param {NativeFailure} failure @returns {FetchError} */
+/** @param {FetchFailure} failure @returns {FetchError} */
 const completionError=(failure) => {
     let error;
     if(failure.type==="LimitExceeded") error=new RangeError(failure.message);
@@ -117,7 +116,7 @@ export class Headers {
         if(arguments.length<1) throw new TypeError("has requires a name");
         return this.#values.has(normalizeName(name));
     }
-    /** @returns {Generator<HeaderPair, void, undefined>} */
+    /** @returns {Generator<[string, string], void, undefined>} */
     *entries() {
         yield* Array.from(this.#values).sort((left,right) => {
             if(left[0]<right[0]) return -1;
@@ -137,9 +136,9 @@ export class Headers {
     }
 }
 class RequestState {
-    /** @type {NativeRequest | null} */
+    /** @type {FetchRequestHandle | null} */
     request=null;
-    /** @type {Pending<ResponseMetadata> | null} */
+    /** @type {Pending<FetchResponseMetadata> | null} */
     headers=null;
     /** @type {Pending<ReadResult> | null} */
     reading=null;
@@ -223,7 +222,7 @@ class RequestState {
         this.ended=true;
         this.dispose();
     }
-    /** @param {NativeFailure | null} failure @param {ResponseMetadata | null} metadata @returns {void} */
+    /** @param {FetchFailure | null} failure @param {FetchResponseMetadata | null} metadata @returns {void} */
     receiveHeaders(failure,metadata) {
         const headers=this.headers;
         this.headers=null;
@@ -332,7 +331,7 @@ class Response {
     #body;
     /** @type {string} */
     #url;
-    /** @param {RequestState} state @param {ResponseMetadata} metadata @param {string} url @param {string} method */
+    /** @param {RequestState} state @param {FetchResponseMetadata} metadata @param {string} url @param {string} method */
     constructor(state,metadata,url,method) {
         this.#state=state;
         this.#status=metadata.status;
@@ -424,7 +423,7 @@ export async function fetch(input,init) {
     }
     const state=new RequestState();
     try {
-        /** @type {ResponseMetadata} */
+        /** @type {FetchResponseMetadata} */
         const metadata=await new Promise((resolve,reject) => {
             state.headers={ resolve,reject };
             try {

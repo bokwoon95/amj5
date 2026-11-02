@@ -4,76 +4,103 @@ Dependency order: **text -> URL -> scheduler -> timeout -> fetch**. JavaScript
 facades export their public API; they do not install anything on the global object.
 The host chooses which target receives those exports.
 
-## Native/JS boundary
+## Modules and native/JS boundary
 
-- `text.js` exports UTF-8 `TextEncoder` and `TextDecoder` classes.
-- `URLImpl::createModule(jsContext)` registers `amj:url`, exporting `urlImpl`.
-  Its stateless Ada operations are `parse`, `set`, `parseQuery`, and
-  `serializeQuery`. `url.js` imports that object and exports `URL` and
-  `URLSearchParams`, implementing coercion, iteration, and query synchronization.
-- C++ `installTimeout(jsContext, target, scheduler)` directly installs
-  `setTimeout` and `clearTimeout`. There is no JS facade.
-- `FetchImpl::createModule(jsContext, scheduler)` registers `amj:fetch`,
-  exporting `fetchImpl` with `start`, `read`, and `close` operations bound to
-  one native HTTP owner. `fetch.js` imports that object and the URL/text classes,
-  and exports `Headers` and `fetch`. Response objects and body readers remain
-  internal classes, not public constructors.
+| Module name | Implementation | Exports |
+| --- | --- | --- |
+| `amj:text` | `text.js` | `TextEncoder`, `TextDecoder` |
+| `amj:url_impl` | `url_impl.hpp/.cpp` | `urlImpl` |
+| `amj:url` | `url.js` | `URL`, `URLSearchParams` |
+| `amj:timeout_impl` | `timeout_impl.hpp/.cpp` | `setTimeout`, `clearTimeout` |
+| `amj:fetch_impl` | `fetch_impl.hpp/.cpp` | `fetchImpl` |
+| `amj:fetch` | `fetch.js` | `Headers`, `fetch` |
 
-Register each native module once per context before loading the JS facades;
-check for nullptr and a pending JS exception. Module definitions belong to the
-context, not the caller. The lower-level `URLImpl::create()` and
-`FetchImpl::create()` object factories remain available.
+`URLImpl::createModule(jsContext)` registers `amj:url_impl`. Its stateless Ada
+operations are `parse`, `set`, `parseQuery`, and `serializeQuery`. `url.js` imports
+that object and implements coercion, iteration, and live query synchronization.
 
-The host must provide a module loader for the JS files and preserve the registered
-`amj:url` / `amj:fetch` module names. After evaluating each facade, the host can
-obtain its namespace with `JS_GetModuleNamespace`, enumerate own string exports,
-and copy their values onto its chosen target. No installer functions or
-hardcoded constructor-name lists are needed. Check evaluation/property-operation
-failures and manage QuickJS value and atom references normally. Decide explicitly
-whether existing target properties may be overwritten. Copying exports copies
-values rather than installing live module bindings; these API exports are not
-subsequently reassigned.
+`FetchImpl::createModule(jsContext, scheduler)` registers `amj:fetch_impl`.
+`fetchImpl.start/read/close` belong to one HTTP owner. `fetch.js` imports that
+object and the URL/text classes. JS owns Promises, abort reasons, public argument
+normalization, Response objects, and body readers. Response and reader classes
+are internal, not public constructors.
 
-Native calls use `urlImpl.method()` / `fetchImpl.method()` directly. All native
-instances use the same context and owner thread as their scheduler.
+`TimeoutImpl::createModule(jsContext, scheduler)` registers `amj:timeout_impl`,
+exporting the two C++-backed timer functions directly. There is intentionally no
+`timeout.js` or `amj:timeout` facade.
 
-CMake copies the JS facades and their `.d.ts` files into the build's
-`javascript/` directory. Keep the files together when distributing them.
+Register each C++ module once per context before loading its consumers. Check
+for nullptr and a pending JS exception. Module definitions belong to the context,
+not the caller. Each implementation also provides `create()` to construct its
+JS exports object independently of module registration. All native instances
+use the same context and owner thread as their scheduler.
+
+The embedding host must supply a QuickJS module loader that maps `amj:text`,
+`amj:url`, and `amj:fetch` to the installed JS files. Preserve the registered
+`*_impl` names, and resolve relative JS imports against their file paths.
+There is not yet an application-level JS host/loader in this library; the
+module-name mappings in tsconfig configure TypeScript, not QuickJS execution.
+
+After evaluating each public facade (or the timer module), the host can obtain
+its namespace with `JS_GetModuleNamespace`, enumerate own string exports, and
+copy their values onto its chosen target. No JS installers or hardcoded
+constructor-name lists are needed. Check evaluation/property-operation failures
+and manage QuickJS value and atom references normally. Decide explicitly whether
+existing target properties may be overwritten. Copying exports copies values,
+not live bindings; these API exports are not subsequently reassigned.
+
+CMake copies the JS facades, `*_impl.d.ts`, and `global.d.ts` into the build's
+`javascript/` directory. Keep these files together when distributing them.
+
+## Types and dependency direction
+
+Each `*_impl.d.ts` describes only its C++ module's JS contract. It never imports
+the JS facade. The corresponding headers expose boundary-data types:
+
+- Fetch: `FetchFailure`, `FetchResponseMetadata`, and opaque `FetchRequestHandle`.
+- URL: `URLParts` and `URLComponent` (a C++ enum, represented by strings in JS).
+
+C++ uses standard pairs/vectors; JS uses inline `[string, string]` tuple/array
+types rather than pair aliases. Internal `FetchImplState`, `FetchRequestState`,
+and `FetchHandle` are not part of the JS contract. The request handle's TypeScript
+brand is type-only; JS must not inspect its representation.
+
+Only `global.d.ts` declares the names installed globally by the host. It references
+public JS exports through `typeof import("amj:fetch")` and similar expressions;
+timers reference `amj:timeout_impl` directly. This does not duplicate class or
+function signatures and does not execute code. Dependency direction is:
+
+```text
+C++ contract <- JS facade <- global.d.ts
+C++ timer contract       <- global.d.ts
+```
+
+The `_impl` filename suffix also avoids shadowing inferred JS module types:
+`url.d.ts` beside `url.js` would take precedence when resolving imports.
+Native declarations are static contracts, not runtime validation; keep them
+synchronized with the corresponding headers and implementation.
 
 ## Static type checking
 
-The JS implementations use JSDoc and `// @ts-check`, without transpilation.
-`url_impl.d.ts` and `fetch_impl.d.ts` describe the `URLImpl` and `FetchImpl`
-interfaces exported by the corresponding C++ implementations. Their module names
-remain `amj:url` and `amj:fetch`; JS imports `urlImpl` and `fetchImpl` respectively.
-These declarations, `text_globals.d.ts`, and `timeout.d.ts` also declare the globals
-the host makes available to user scripts. JS-backed globals reference exported
-classes/functions with `typeof import(...)`, avoiding duplicated public API
-signatures. Timer globals are declared directly, since they have no JS facade.
-
-The `_impl` / `_globals` filename suffixes avoid shadowing inferred JS module
-types: a `url.d.ts` beside `url.js` would take precedence when resolving imports.
-Native declarations are static contracts, not runtime validation; keep them
-synchronized with the corresponding C++ headers and implementation.
-
-The root `tsconfig.json` references these declarations instead of browser/Node
-libraries. `src/javascript/tsconfig.json` checks the implementation project.
-Both retain strict checking, checked indexed access, and exact optional
-properties. Run from the repository root with TypeScript 5.2 or newer:
+JS uses JSDoc and `// @ts-check`, without transpilation. The root `tsconfig.json`
+references `global.d.ts` and the three C++ module declarations; `paths` maps public
+`amj:*` names to JS implementations. No browser DOM or Node APIs are assumed.
+One project checks all JS files, including the implementations, against the
+host-provided globals. It retains strict checking, checked indexed access, and
+exact optional properties. Run from the repository root with TypeScript 5.2 or newer:
 
 ```sh
 tsc --project tsconfig.json
-tsc --project src/javascript/tsconfig.json
 ```
 
 For future user-script directories, generate a tsconfig with `allowJs`,
 `checkJs`, `noEmit`, `lib: ["ES2023"]`, `types: []`, and a `files` list pointing
-to the installed `text_globals.d.ts`, `url_impl.d.ts`, `timeout.d.ts`, and
-`fetch_impl.d.ts` files. Relative imports within the
-declarations resolve against their install directory. Editors can then navigate
-JS-backed APIs to their exported implementations and native-only APIs to their
-declarations. These editor references do not import code into QuickJS or install
-runtime globals. No browser DOM or Node APIs are assumed.
+to installed `global.d.ts`, `url_impl.d.ts`, `fetch_impl.d.ts`, and
+`timeout_impl.d.ts`. Add `paths` entries for `amj:text`, `amj:url`, and
+`amj:fetch`, pointing to the installed JS files. Paths are relative to the config
+or can be generated as absolute installation paths. Editor definitions for globals
+lead to `global.d.ts`; following its imported member leads to the JS export or,
+for timers, the C++ module declaration. TypeScript cannot navigate into C++.
 
 ## Scheduling and cleanup
 
@@ -87,17 +114,16 @@ hold weak request references, so removing them cannot join a worker under the
 scheduler mutex. Buffer locks are released before notifying the scheduler or
 calling JS. Completion callback exceptions propagate through `runNext()`.
 
-`fetchImpl.close(request)` joins the worker and drops pending completion
-functions without calling them. JS cancellation settles its pending Promises and
-closes the handle; scheduler teardown deliberately does not settle abandoned
-Promises or run JS. Callers should cancel/release readers in `finally`.
-Cancellation/join can block on native DNS/connect/OS calls: do not run this host
-loop on the UI thread.
+`fetchImpl.close(request)` joins the worker and drops pending completion functions
+without calling them. JS cancellation settles its pending Promises and closes
+the handle; scheduler teardown deliberately does not settle abandoned Promises
+or run JS. Callers should cancel/release readers in `finally`. Cancellation/join
+can block on native DNS/connect/OS calls: do not run this host loop on the UI thread.
 
 Clear/destroy the scheduler before freeing the JS context. `clear()` invalidates
-native fetch instances and timer installations. Reinstall timers and use a fresh
-context/module registration for fetch, or use a new lower-level native owner.
-URL and text do not depend on scheduler lifetime.
+fetch and timer owners. Use a fresh context/module registration, or create new
+lower-level exports objects, to reuse the scheduler. URL and text do not depend
+on scheduler lifetime.
 
 The fetch facade remains a subset: HTTP(S), no redirects/cookies/retries,
 string/Uint8Array uploads, `.text()`/`.json()`, and `body.getReader()` streaming.

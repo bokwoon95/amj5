@@ -76,9 +76,21 @@ JSValue snapshot(JSContext* jsContext, const ada::url_aggregator& url) {
     if (std::count(search.begin(), search.end(), '&') >= pairLimit) {
         return JS_ThrowRangeError(jsContext, "URL query exceeds 65536 pairs");
     }
-    const std::string origin = url.get_origin();
+    const URLParts parts = {
+        .href = std::string(url.get_href()),
+        .origin = url.get_origin(),
+        .protocol = std::string(url.get_protocol()),
+        .username = std::string(url.get_username()),
+        .password = std::string(url.get_password()),
+        .host = std::string(url.get_host()),
+        .hostname = std::string(url.get_hostname()),
+        .port = std::string(url.get_port()),
+        .pathname = std::string(url.get_pathname()),
+        .search = std::string(search),
+        .hash = std::string(url.get_hash()),
+    };
     const std::array<std::pair<const char*, std::string_view>, 11> fields = {
-        {{"href", url.get_href()}, {"origin", origin}, {"protocol", url.get_protocol()}, {"username", url.get_username()}, {"password", url.get_password()}, {"host", url.get_host()}, {"hostname", url.get_hostname()}, {"port", url.get_port()}, {"pathname", url.get_pathname()}, {"search", search}, {"hash", url.get_hash()}}};
+        {{"href", parts.href}, {"origin", parts.origin}, {"protocol", parts.protocol}, {"username", parts.username}, {"password", parts.password}, {"host", parts.host}, {"hostname", parts.hostname}, {"port", parts.port}, {"pathname", parts.pathname}, {"search", parts.search}, {"hash", parts.hash}}};
     const JSValueOwner result(jsContext, JS_NewObjectProto(jsContext, nullValue));
     if (JS_IsException(result.value)) {
         return exceptionValue;
@@ -153,30 +165,50 @@ JSValue URLImpl::set(JSContext* jsContext, JSValueConst href, JSValueConst compo
         return nullValue;
     }
     ada::url_aggregator& url = parsed.value();
-    const std::string& name = componentText.value();
-    bool accepted = true;
-    if (name == "href") {
-        accepted = url.set_href(valueText.value());
-    } else if (name == "protocol") {
-        accepted = url.set_protocol(valueText.value());
-    } else if (name == "username") {
-        accepted = url.set_username(valueText.value());
-    } else if (name == "password") {
-        accepted = url.set_password(valueText.value());
-    } else if (name == "host") {
-        accepted = url.set_host(valueText.value());
-    } else if (name == "hostname") {
-        accepted = url.set_hostname(valueText.value());
-    } else if (name == "port") {
-        accepted = url.set_port(valueText.value());
-    } else if (name == "pathname") {
-        accepted = url.set_pathname(valueText.value());
-    } else if (name == "search") {
-        url.set_search(valueText.value());
-    } else if (name == "hash") {
-        url.set_hash(valueText.value());
-    } else {
+    const std::array<std::pair<std::string_view, URLComponent>, 10> components = {
+        {{"href", URLComponent::Href}, {"protocol", URLComponent::Protocol}, {"username", URLComponent::Username}, {"password", URLComponent::Password}, {"host", URLComponent::Host}, {"hostname", URLComponent::Hostname}, {"port", URLComponent::Port}, {"pathname", URLComponent::Pathname}, {"search", URLComponent::Search}, {"hash", URLComponent::Hash}}};
+    std::optional<URLComponent> urlComponent;
+    for (const std::pair<std::string_view, URLComponent>& entry : components) {
+        if (entry.first == componentText.value()) {
+            urlComponent = entry.second;
+            break;
+        }
+    }
+    if (!urlComponent.has_value()) {
         return JS_ThrowTypeError(jsContext, "Unknown URL component");
+    }
+    bool accepted = true;
+    switch (urlComponent.value()) {
+    case URLComponent::Href:
+        accepted = url.set_href(valueText.value());
+        break;
+    case URLComponent::Protocol:
+        accepted = url.set_protocol(valueText.value());
+        break;
+    case URLComponent::Username:
+        accepted = url.set_username(valueText.value());
+        break;
+    case URLComponent::Password:
+        accepted = url.set_password(valueText.value());
+        break;
+    case URLComponent::Host:
+        accepted = url.set_host(valueText.value());
+        break;
+    case URLComponent::Hostname:
+        accepted = url.set_hostname(valueText.value());
+        break;
+    case URLComponent::Port:
+        accepted = url.set_port(valueText.value());
+        break;
+    case URLComponent::Pathname:
+        accepted = url.set_pathname(valueText.value());
+        break;
+    case URLComponent::Search:
+        url.set_search(valueText.value());
+        break;
+    case URLComponent::Hash:
+        url.set_hash(valueText.value());
+        break;
     }
     if (!accepted) {
         return nullValue;
@@ -304,7 +336,7 @@ JSValue URLImpl::create(JSContext* jsContext) {
 }
 
 JSModuleDef* URLImpl::createModule(JSContext* jsContext) {
-    JSModuleDef* module = JS_NewCModule(jsContext, "amj:url", [](JSContext* jsContext, JSModuleDef* module) -> int {
+    JSModuleDef* module = JS_NewCModule(jsContext, "amj:url_impl", [](JSContext* jsContext, JSModuleDef* module) -> int {
         const JSValue urlImpl = URLImpl::create(jsContext);
         if (JS_IsException(urlImpl)) {
             return -1;

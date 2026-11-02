@@ -2,12 +2,11 @@
 // Public URL API over URLImpl::{parse,set,parseQuery,serializeQuery}.
 // Only Ada parsing/encoding crosses into C++; JS owns all object behavior.
 
-import { urlImpl } from "amj:url";
+import { urlImpl } from "amj:url_impl";
 
-/** @typedef {import("amj:url").QueryPair} QueryPair */
-/** @typedef {import("amj:url").URLParts} URLParts */
-/** @typedef {import("amj:url").URLComponent} URLComponent */
-/** @typedef {{pairs: QueryPair[], changed: ((encoded: string) => void) | null}} ParamsState */
+/** @typedef {import("amj:url_impl").URLParts} URLParts */
+/** @typedef {import("amj:url_impl").URLComponent} URLComponent */
+/** @typedef {{pairs: [string, string][], changed: ((encoded: string) => void) | null}} ParamsState */
 /** @type {WeakMap<URLSearchParams, ParamsState>} */
 const paramsStates=new WeakMap();
 const pairLimit=65536;
@@ -36,7 +35,7 @@ export class URLSearchParams {
     #state={ pairs: [],changed: null };
     /** @param {unknown} [input] */
     constructor(input) {
-        /** @type {QueryPair[]} */
+        /** @type {[string, string][]} */
         let pairs=[];
         let bytes=0;
         if(input!==undefined&&input!==null) {
@@ -67,7 +66,7 @@ export class URLSearchParams {
                 } else {
                     for(const name of Object.keys(input)) {
                         if(pairs.length>=pairLimit) throw new RangeError("URL query exceeds 65536 pairs");
-                        /** @type {QueryPair} */
+                        /** @type {[string, string]} */
                         const fields=[scalarString(name),scalarString(properties[name])];
                         bytes+=byteLength(fields[0])+byteLength(fields[1]);
                         if(bytes>inputLimit) throw new RangeError("URL query exceeds 1 MiB");
@@ -82,7 +81,7 @@ export class URLSearchParams {
         this.#state.pairs=pairs;
         paramsStates.set(this,this.#state);
     }
-    /** @param {QueryPair[]} pairs @returns {void} */
+    /** @param {[string, string][]} pairs @returns {void} */
     #commit(pairs) {
         const encoded=urlImpl.serializeQuery(pairs);
         if(this.#state.changed!==null) this.#state.changed(encoded);
@@ -132,7 +131,7 @@ export class URLSearchParams {
         if(arguments.length<2) throw new TypeError("set requires two arguments");
         const nameText=scalarString(name);
         const valueText=scalarString(value);
-        /** @type {QueryPair[]} */
+        /** @type {[string, string][]} */
         const pairs=[];
         let found=false;
         for(const pair of this.#state.pairs) {
@@ -165,7 +164,7 @@ export class URLSearchParams {
             callback.call(thisArg,pair[1],pair[0],this);
         }
     }
-    /** @returns {Generator<QueryPair, void, unknown>} */
+    /** @returns {Generator<[string, string], void, unknown>} */
     *entries() {
         let index=0;
         while(index<this.#state.pairs.length) {

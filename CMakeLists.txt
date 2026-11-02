@@ -145,13 +145,13 @@ endif()
 # File-by-file dependency order: text -> URL -> scheduler -> timeout -> fetch.
 add_library(amj_javascript STATIC
     src/javascript/text.js
-    src/javascript/text_globals.d.ts
+    src/javascript/global.d.ts
     src/javascript/url_impl.cpp
     src/javascript/url.js
     src/javascript/url_impl.d.ts
     src/javascript/scheduler.cpp
-    src/javascript/timeout.cpp
-    src/javascript/timeout.d.ts
+    src/javascript/timeout_impl.cpp
+    src/javascript/timeout_impl.d.ts
     src/javascript/fetch_impl.cpp
     src/javascript/fetch.js
     src/javascript/fetch_impl.d.ts
@@ -162,9 +162,9 @@ target_link_libraries(amj_javascript PUBLIC amj_errors qjs PRIVATE Threads::Thre
 configure_file(src/javascript/url.js javascript/url.js COPYONLY)
 configure_file(src/javascript/text.js javascript/text.js COPYONLY)
 configure_file(src/javascript/fetch.js javascript/fetch.js COPYONLY)
-configure_file(src/javascript/text_globals.d.ts javascript/text_globals.d.ts COPYONLY)
+configure_file(src/javascript/global.d.ts javascript/global.d.ts COPYONLY)
 configure_file(src/javascript/url_impl.d.ts javascript/url_impl.d.ts COPYONLY)
-configure_file(src/javascript/timeout.d.ts javascript/timeout.d.ts COPYONLY)
+configure_file(src/javascript/timeout_impl.d.ts javascript/timeout_impl.d.ts COPYONLY)
 configure_file(src/javascript/fetch_impl.d.ts javascript/fetch_impl.d.ts COPYONLY)
 
 ## == Tests == ##

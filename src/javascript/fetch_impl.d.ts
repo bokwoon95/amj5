@@ -1,27 +1,22 @@
-// C++ contract from fetch_impl.hpp. Request handles are opaque to JavaScript.
-declare module "amj:fetch" {
-    export type HeaderPair = [string, string];
-    export interface NativeRequest {
-        readonly __nativeFetchRequest: unique symbol;
+// JavaScript representation of the boundary types and operations in fetch_impl.hpp.
+declare module "amj:fetch_impl" {
+    export interface FetchRequestHandle {
+        readonly __fetchRequestHandle: unique symbol;
     }
-    export interface NativeFailure {
+    export interface FetchFailure {
         type: string;
         message: string;
     }
-    export interface ResponseMetadata {
+    export interface FetchResponseMetadata {
         status: number;
-        headers: HeaderPair[];
+        headers: [string, string][];
     }
     export interface FetchImpl {
-        start(url: string, method: string, headerPairs: HeaderPair[], bytes: Uint8Array,
-            onHeaders: (failure: NativeFailure | null, metadata: ResponseMetadata | null) => void): NativeRequest;
-        read(request: NativeRequest,
-            onRead: (failure: NativeFailure | null, chunk: Uint8Array | null) => void): void;
-        close(request: NativeRequest): void;
+        start(url: string, method: string, headerPairs: [string, string][], bytes: Uint8Array,
+            onHeaders: (failure: FetchFailure | null, metadata: FetchResponseMetadata | null) => void): FetchRequestHandle;
+        read(request: FetchRequestHandle,
+            onRead: (failure: FetchFailure | null, chunk: Uint8Array | null) => void): void;
+        close(request: FetchRequestHandle): void;
     }
     export const fetchImpl: FetchImpl;
 }
-
-declare var Headers: typeof import("./fetch.js").Headers;
-type Headers = import("./fetch.js").Headers;
-declare var fetch: typeof import("./fetch.js").fetch;
