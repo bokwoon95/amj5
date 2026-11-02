@@ -1,0 +1,14 @@
+{
+  "private": true,
+  "scripts": {
+    "format": "eslint src/javascript --fix",
+    "check": "eslint src/javascript"
+  },
+  "devDependencies": {
+    "eslint": "^9.0.0",
+    "eslint-config-prettier": "^10.0.0",
+    "eslint-plugin-jsdoc": "^63.3.3",
+    "eslint-plugin-prettier": "^5.0.0",
+    "prettier": "^3.0.0"
+  }
+}

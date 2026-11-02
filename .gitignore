@@ -2,6 +2,7 @@
 /build/
 /vcpkg_installed/
 /dist/
+/node_modules/
 *.exe
 *.log
 /.venv/
