@@ -1,6 +1,6 @@
 # JavaScript modules
 
-Dependency order: **URL → text → scheduler → timeout → fetch**. Modules install
+Dependency order: **text -> URL -> scheduler -> timeout -> fetch**. Modules install
 only onto caller-supplied targets, never automatically onto the global object.
 
 ## Native/JS boundary
