@@ -12,6 +12,12 @@
     "lib": ["ES2023"],
     "types": []
   },
+  "files": [
+    "src/javascript/native-text.d.ts",
+    "src/javascript/native-url.d.ts",
+    "src/javascript/native-timeout.d.ts",
+    "src/javascript/native-fetch.d.ts"
+  ],
   "include": ["**/*.js"],
-  "exclude": ["build", "dist", "vcpkg_installed", "node_modules", ".venv"]
+  "exclude": ["src/javascript", "build", "dist", "vcpkg_installed", "node_modules", ".venv"]
 }

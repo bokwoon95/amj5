@@ -303,4 +303,18 @@ JSValue NativeURL::create(JSContext* jsContext) {
     return result.release();
 }
 
+JSModuleDef* NativeURL::createModule(JSContext* jsContext) {
+    JSModuleDef* module = JS_NewCModule(jsContext, "amj:url", [](JSContext* jsContext, JSModuleDef* module) -> int {
+        const JSValue nativeURL = NativeURL::create(jsContext);
+        if (JS_IsException(nativeURL)) {
+            return -1;
+        }
+        return JS_SetModuleExport(jsContext, module, "nativeURL", nativeURL);
+    });
+    if (module == nullptr || JS_AddModuleExport(jsContext, module, "nativeURL") < 0) {
+        return nullptr;
+    }
+    return module;
+}
+
 } // namespace amj::javascript

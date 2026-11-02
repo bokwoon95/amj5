@@ -35,8 +35,7 @@ class NativeFetch {
     JSValue close(JSContext* jsContext, JSValueConst request);
 
     // Returns a private JS object exposing start/read/close bound to an owned
-    // NativeFetch instance, or JS_EXCEPTION. Pass it to JS
-    // installFetch(target, nativeFetch, URL, TextEncoder, TextDecoder).
+    // NativeFetch instance, or JS_EXCEPTION. Used by createModule().
     // The scheduler/context are borrowed. Clear/destroy the scheduler before the
     // context. Cleanup invalidates the instance and joins workers without calling
     // JS; recreate after clear(). Completion callbacks hold weak native references,
@@ -47,6 +46,11 @@ class NativeFetch {
     // body per request. Timeouts: 10s connect, 60s read, 30s write. DNS/connect/OS
     // calls may delay cancellation/join: use off the UI thread.
     static JSValue create(JSContext* jsContext, Scheduler& scheduler);
+
+    // Registers amj:fetch, exporting nativeFetch bound to this scheduler.
+    // Call once per context before loading fetch.js. Returns a context-owned
+    // module, or nullptr with a pending exception. Same lifetime rules as create().
+    static JSModuleDef* createModule(JSContext* jsContext, Scheduler& scheduler);
 
   private:
     std::shared_ptr<FetchState> fetchState = nullptr;

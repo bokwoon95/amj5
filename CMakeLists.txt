@@ -142,15 +142,19 @@ endif()
 
 ## == src/javascript == ##
 
-# File-by-file dependency order: URL -> text -> scheduler -> timeout -> fetch.
+# File-by-file dependency order: text -> URL -> scheduler -> timeout -> fetch.
 add_library(amj_javascript STATIC
+    src/javascript/text.js
+    src/javascript/native-text.d.ts
     src/javascript/url.cpp
     src/javascript/url.js
-    src/javascript/text.js
+    src/javascript/native-url.d.ts
     src/javascript/scheduler.cpp
     src/javascript/timeout.cpp
+    src/javascript/native-timeout.d.ts
     src/javascript/fetch.cpp
     src/javascript/fetch.js
+    src/javascript/native-fetch.d.ts
 )
 list(APPEND amj_libraries amj_javascript)
 target_link_libraries(amj_javascript PUBLIC amj_errors qjs PRIVATE Threads::Threads ada::ada httplib::httplib OpenSSL::SSL OpenSSL::Crypto)
@@ -158,6 +162,10 @@ target_link_libraries(amj_javascript PUBLIC amj_errors qjs PRIVATE Threads::Thre
 configure_file(src/javascript/url.js javascript/url.js COPYONLY)
 configure_file(src/javascript/text.js javascript/text.js COPYONLY)
 configure_file(src/javascript/fetch.js javascript/fetch.js COPYONLY)
+configure_file(src/javascript/native-text.d.ts javascript/native-text.d.ts COPYONLY)
+configure_file(src/javascript/native-url.d.ts javascript/native-url.d.ts COPYONLY)
+configure_file(src/javascript/native-timeout.d.ts javascript/native-timeout.d.ts COPYONLY)
+configure_file(src/javascript/native-fetch.d.ts javascript/native-fetch.d.ts COPYONLY)
 
 ## == Tests == ##
 

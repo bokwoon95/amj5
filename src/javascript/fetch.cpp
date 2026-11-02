@@ -863,4 +863,25 @@ JSValue NativeFetch::create(JSContext* jsContext, Scheduler& scheduler) try {
     return JS_ThrowInternalError(jsContext, "Unexpected native Fetch creation failure");
 }
 
+JSModuleDef* NativeFetch::createModule(JSContext* jsContext, Scheduler& scheduler) {
+    JSValueOwner nativeFetch(jsContext, NativeFetch::create(jsContext, scheduler));
+    if (JS_IsException(nativeFetch.value)) {
+        return nullptr;
+    }
+    JSModuleDef* module = JS_NewCModule(jsContext, "amj:fetch", [](JSContext* jsContext, JSModuleDef* module) -> int {
+        const JSValue nativeFetch = JS_GetModulePrivateValue(jsContext, module);
+        if (JS_IsException(nativeFetch)) {
+            return -1;
+        }
+        return JS_SetModuleExport(jsContext, module, "nativeFetch", nativeFetch);
+    });
+    if (module == nullptr || JS_AddModuleExport(jsContext, module, "nativeFetch") < 0) {
+        return nullptr;
+    }
+    if (JS_SetModulePrivateValue(jsContext, module, nativeFetch.release()) < 0) {
+        return nullptr;
+    }
+    return module;
+}
+
 } // namespace amj::javascript

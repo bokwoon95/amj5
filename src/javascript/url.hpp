@@ -34,8 +34,12 @@ class NativeURL {
 
     // Returns a private JS object exposing parse, set, parseQuery, serializeQuery,
     // bound to the corresponding methods above, or JS_EXCEPTION on failure.
-    // Pass it to JS installURL(target, nativeURL). No public URL classes live in C++.
+    // Used by createModule(). No public URL classes live in C++.
     static JSValue create(JSContext* jsContext);
+
+    // Registers amj:url, exporting nativeURL. Call once per context before loading
+    // url.js. Returns a context-owned module, or nullptr with a pending exception.
+    static JSModuleDef* createModule(JSContext* jsContext);
 };
 
 } // namespace amj::javascript
