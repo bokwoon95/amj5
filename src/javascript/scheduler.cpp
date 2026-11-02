@@ -69,7 +69,7 @@ Scheduler::~Scheduler() {
     }
 }
 
-std::expected<int64_t, errors::Error> Scheduler::registerCallback(std::function<errors::Error()> callback, std::optional<chrono::steady_clock::time_point> triggerTime) {
+std::expected<int64_t, errors::Error> Scheduler::registerCallback(const std::function<errors::Error()>& callback, std::optional<chrono::steady_clock::time_point> triggerTime) {
     if (this_thread::get_id() != ownerThreadID) {
         return std::unexpected(errors::message("called registerCallback() outside owner thread"));
     }
@@ -118,7 +118,7 @@ errors::Error Scheduler::markReady(int64_t callbackID) {
     return {};
 }
 
-std::expected<int64_t, errors::Error> Scheduler::registerCleanup(std::function<errors::Error()> cleanup) {
+std::expected<int64_t, errors::Error> Scheduler::registerCleanup(const std::function<errors::Error()>& cleanup) {
     if (this_thread::get_id() != ownerThreadID) {
         return std::unexpected(errors::message("called registerCleanup() outside owner thread"));
     }

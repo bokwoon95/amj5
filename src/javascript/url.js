@@ -1,8 +1,8 @@
 // @ts-check
-// Public URL API over NativeURL::{parse,set,parseQuery,serializeQuery}.
+// Public URL API over URLImpl::{parse,set,parseQuery,serializeQuery}.
 // Only Ada parsing/encoding crosses into C++; JS owns all object behavior.
 
-import { nativeURL } from "amj:url";
+import { urlImpl } from "amj:url";
 
 /** @typedef {import("amj:url").QueryPair} QueryPair */
 /** @typedef {import("amj:url").URLParts} URLParts */
@@ -75,16 +75,16 @@ export class URLSearchParams {
                     }
                 }
             } else {
-                pairs=nativeURL.parseQuery(scalarString(input));
+                pairs=urlImpl.parseQuery(scalarString(input));
             }
         }
-        nativeURL.serializeQuery(pairs);
+        urlImpl.serializeQuery(pairs);
         this.#state.pairs=pairs;
         paramsStates.set(this,this.#state);
     }
     /** @param {QueryPair[]} pairs @returns {void} */
     #commit(pairs) {
-        const encoded=nativeURL.serializeQuery(pairs);
+        const encoded=urlImpl.serializeQuery(pairs);
         if(this.#state.changed!==null) this.#state.changed(encoded);
         this.#state.pairs=pairs;
     }
@@ -154,7 +154,7 @@ export class URLSearchParams {
         });
         this.#commit(pairs);
     }
-    toString() { return nativeURL.serializeQuery(this.#state.pairs); }
+    toString() { return urlImpl.serializeQuery(this.#state.pairs); }
     /** @param {(this: unknown, value: string, name: string, params: URLSearchParams) => void} callback @param {unknown} [thisArg] @returns {void} */
     forEach(callback,thisArg) {
         if(typeof callback!=="function") throw new TypeError("Expected a callback");
@@ -194,14 +194,14 @@ export class URL {
         if(arguments.length<1) throw new TypeError("URL requires an input");
         const inputText=scalarString(input);
         const baseText=base===undefined? null:scalarString(base);
-        const parts=nativeURL.parse(inputText,baseText);
+        const parts=urlImpl.parse(inputText,baseText);
         if(parts===null) throw new TypeError("Invalid URL");
         this.#parts=parts;
         this.#searchParams=new URLSearchParams(parts.search);
         const paramsState=paramsStates.get(this.#searchParams);
         if(paramsState===undefined) throw new TypeError("Missing URL query state");
         paramsState.changed=(encoded) => {
-            const updated=nativeURL.set(this.#parts.href,"search",encoded);
+            const updated=urlImpl.set(this.#parts.href,"search",encoded);
             if(updated===null) throw new TypeError("Invalid URL query");
             this.#parts=updated;
         };
@@ -209,14 +209,14 @@ export class URL {
     /** @param {URLComponent} component @param {unknown} value @returns {void} */
     #set(component,value) {
         const valueText=scalarString(value); // Coercion can mutate the URL; read href afterward.
-        const updated=nativeURL.set(this.#parts.href,component,valueText);
+        const updated=urlImpl.set(this.#parts.href,component,valueText);
         if(updated===null) {
             if(component==="href") throw new TypeError("Invalid URL");
             return;
         }
         if(component==="href"||component==="search") {
-            const pairs=nativeURL.parseQuery(updated.search);
-            nativeURL.serializeQuery(pairs);
+            const pairs=urlImpl.parseQuery(updated.search);
+            urlImpl.serializeQuery(pairs);
             const paramsState=paramsStates.get(this.#searchParams);
             if(paramsState===undefined) throw new TypeError("Missing URL query state");
             paramsState.pairs=pairs;
@@ -228,14 +228,14 @@ export class URL {
         if(arguments.length<1) throw new TypeError("URL.canParse requires an input");
         const inputText=scalarString(input);
         const baseText=base===undefined? null:scalarString(base);
-        return nativeURL.parse(inputText,baseText)!==null;
+        return urlImpl.parse(inputText,baseText)!==null;
     }
     /** @param {unknown} input @param {unknown} [base] @returns {URL | null} */
     static parse(input,base) {
         if(arguments.length<1) throw new TypeError("URL.parse requires an input");
         const inputText=scalarString(input);
         const baseText=base===undefined? null:scalarString(base);
-        const parts=nativeURL.parse(inputText,baseText);
+        const parts=urlImpl.parse(inputText,baseText);
         if(parts===null) return null;
         return new URL(parts.href);
     }

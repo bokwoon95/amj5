@@ -49,7 +49,7 @@ class Scheduler {
 
     // nullopt means readiness is explicit. An elapsed callAt or markReady() makes the
     // callback runnable. IDs are never reused, including across clear().
-    [[nodiscard]] std::expected<int64_t, errors::Error> registerCallback(std::function<errors::Error()> callback, std::optional<chrono::steady_clock::time_point> optionalTriggerTime);
+    [[nodiscard]] std::expected<int64_t, errors::Error> registerCallback(const std::function<errors::Error()>& callback, std::optional<chrono::steady_clock::time_point> optionalTriggerTime);
 
     // Removes the callback and its readiness timestamp/deadline; invokes no cleanup.
     // Unknown IDs are ignored.
@@ -62,7 +62,7 @@ class Scheduler {
 
     // Cleanups only cancel native operations and release resources. They must not
     // execute JS or modify the pending JS exception; JS cleanup belongs in finally.
-    [[nodiscard]] std::expected<int64_t, errors::Error> registerCleanup(std::function<errors::Error()> cleanup);
+    [[nodiscard]] std::expected<int64_t, errors::Error> registerCleanup(const std::function<errors::Error()>& cleanup);
 
     // Removes before invoking, so repeat/reentrant calls are no-ops. Does not
     // unregister callbacks: modules manage those independently.

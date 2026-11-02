@@ -1,4 +1,4 @@
-#include "url.hpp"
+#include "url_impl.hpp"
 
 #include <ada.h> // IWYU pragma: keep
 #include <ada/implementation.h>
@@ -94,23 +94,23 @@ JSValue snapshot(JSContext* jsContext, const ada::url_aggregator& url) {
 
 JSValue urlOperation(JSContext* jsContext, JSValueConst /* thisValue */, int argc, JSValueConst* argv, int operation) {
     if (operation == 0 && argc >= 2) {
-        return NativeURL::parse(jsContext, argv[0], argv[1]);
+        return URLImpl::parse(jsContext, argv[0], argv[1]);
     }
     if (operation == 1 && argc >= 3) {
-        return NativeURL::set(jsContext, argv[0], argv[1], argv[2]);
+        return URLImpl::set(jsContext, argv[0], argv[1], argv[2]);
     }
     if (operation == 2 && argc >= 1) {
-        return NativeURL::parseQuery(jsContext, argv[0]);
+        return URLImpl::parseQuery(jsContext, argv[0]);
     }
     if (operation == 3 && argc >= 1) {
-        return NativeURL::serializeQuery(jsContext, argv[0]);
+        return URLImpl::serializeQuery(jsContext, argv[0]);
     }
     return JS_ThrowTypeError(jsContext, "Missing native URL arguments");
 }
 
 } // namespace
 
-JSValue NativeURL::parse(JSContext* jsContext, JSValueConst input, JSValueConst baseOrNull) try {
+JSValue URLImpl::parse(JSContext* jsContext, JSValueConst input, JSValueConst baseOrNull) try {
     const std::optional<std::string> inputText = readString(jsContext, input);
     if (!inputText.has_value()) {
         return exceptionValue;
@@ -141,7 +141,7 @@ JSValue NativeURL::parse(JSContext* jsContext, JSValueConst input, JSValueConst 
     return JS_ThrowInternalError(jsContext, "Unexpected native URL parsing failure");
 }
 
-JSValue NativeURL::set(JSContext* jsContext, JSValueConst href, JSValueConst component, JSValueConst value) try {
+JSValue URLImpl::set(JSContext* jsContext, JSValueConst href, JSValueConst component, JSValueConst value) try {
     const std::optional<std::string> hrefText = readString(jsContext, href);
     const std::optional<std::string> componentText = readString(jsContext, component);
     const std::optional<std::string> valueText = readString(jsContext, value);
@@ -190,7 +190,7 @@ JSValue NativeURL::set(JSContext* jsContext, JSValueConst href, JSValueConst com
     return JS_ThrowInternalError(jsContext, "Unexpected native URL mutation failure");
 }
 
-JSValue NativeURL::parseQuery(JSContext* jsContext, JSValueConst query) try {
+JSValue URLImpl::parseQuery(JSContext* jsContext, JSValueConst query) try {
     const std::optional<std::string> text = readString(jsContext, query);
     if (!text.has_value()) {
         return exceptionValue;
@@ -231,7 +231,7 @@ JSValue NativeURL::parseQuery(JSContext* jsContext, JSValueConst query) try {
     return JS_ThrowInternalError(jsContext, "Unexpected native query parsing failure");
 }
 
-JSValue NativeURL::serializeQuery(JSContext* jsContext, JSValueConst pairs) try {
+JSValue URLImpl::serializeQuery(JSContext* jsContext, JSValueConst pairs) try {
     int64_t count = 0;
     if (!JS_IsArray(pairs) || JS_GetLength(jsContext, pairs, &count) < 0) {
         if (JS_HasException(jsContext)) {
@@ -287,7 +287,7 @@ JSValue NativeURL::serializeQuery(JSContext* jsContext, JSValueConst pairs) try 
     return JS_ThrowInternalError(jsContext, "Unexpected native query serialization failure");
 }
 
-JSValue NativeURL::create(JSContext* jsContext) {
+JSValue URLImpl::create(JSContext* jsContext) {
     JSValueOwner result(jsContext, JS_NewObjectProto(jsContext, nullValue));
     if (JS_IsException(result.value)) {
         return exceptionValue;
@@ -303,15 +303,15 @@ JSValue NativeURL::create(JSContext* jsContext) {
     return result.release();
 }
 
-JSModuleDef* NativeURL::createModule(JSContext* jsContext) {
+JSModuleDef* URLImpl::createModule(JSContext* jsContext) {
     JSModuleDef* module = JS_NewCModule(jsContext, "amj:url", [](JSContext* jsContext, JSModuleDef* module) -> int {
-        const JSValue nativeURL = NativeURL::create(jsContext);
-        if (JS_IsException(nativeURL)) {
+        const JSValue urlImpl = URLImpl::create(jsContext);
+        if (JS_IsException(urlImpl)) {
             return -1;
         }
-        return JS_SetModuleExport(jsContext, module, "nativeURL", nativeURL);
+        return JS_SetModuleExport(jsContext, module, "urlImpl", urlImpl);
     });
-    if (module == nullptr || JS_AddModuleExport(jsContext, module, "nativeURL") < 0) {
+    if (module == nullptr || JS_AddModuleExport(jsContext, module, "urlImpl") < 0) {
         return nullptr;
     }
     return module;

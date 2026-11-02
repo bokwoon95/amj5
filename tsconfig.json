@@ -13,10 +13,10 @@
     "types": []
   },
   "files": [
-    "src/javascript/native-text.d.ts",
-    "src/javascript/native-url.d.ts",
-    "src/javascript/native-timeout.d.ts",
-    "src/javascript/native-fetch.d.ts"
+    "src/javascript/text_globals.d.ts",
+    "src/javascript/url_impl.d.ts",
+    "src/javascript/timeout.d.ts",
+    "src/javascript/fetch_impl.d.ts"
   ],
   "include": ["**/*.js"],
   "exclude": ["src/javascript", "build", "dist", "vcpkg_installed", "node_modules", ".venv"]

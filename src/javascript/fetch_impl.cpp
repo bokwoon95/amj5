@@ -1,4 +1,4 @@
-#include "fetch.hpp"
+#include "fetch_impl.hpp"
 
 #include "errors/errors.hpp"
 #include "scheduler.hpp"
@@ -276,7 +276,7 @@ struct FetchState {
 namespace {
 
 struct NativeHandle {
-    std::unique_ptr<NativeFetch> nativeFetch = nullptr;
+    std::unique_ptr<FetchImpl> fetchImpl = nullptr;
     std::weak_ptr<FetchState> owner = {};
     std::weak_ptr<RequestState> requestState = {};
 };
@@ -312,7 +312,7 @@ std::shared_ptr<RequestState> getRequest(JSContext* jsContext, JSValueConst hand
     if (nativeHandle == nullptr) {
         return nullptr;
     }
-    if (nativeHandle->nativeFetch != nullptr || nativeHandle->owner.lock() != fetchState) {
+    if (nativeHandle->fetchImpl != nullptr || nativeHandle->owner.lock() != fetchState) {
         JS_ThrowTypeError(jsContext, "Request belongs to a different native Fetch instance");
         return nullptr;
     }
@@ -492,24 +492,24 @@ bool isToken(const std::string& text) {
 
 JSValue fetchOperation(JSContext* jsContext, JSValueConst /* thisValue */, int argc, JSValueConst* argv, int operation, JSValueConst* functionData) {
     const NativeHandle* nativeHandle = static_cast<NativeHandle*>(JS_GetOpaque(functionData[0], JS_GetClassID(functionData[0])));
-    if (nativeHandle == nullptr || nativeHandle->nativeFetch == nullptr) {
+    if (nativeHandle == nullptr || nativeHandle->fetchImpl == nullptr) {
         return JS_ThrowInternalError(jsContext, "Missing native Fetch instance");
     }
     if (operation == 0 && argc >= 5) {
-        return nativeHandle->nativeFetch->start(jsContext, argv[0], argv[1], argv[2], argv[3], argv[4]);
+        return nativeHandle->fetchImpl->start(jsContext, argv[0], argv[1], argv[2], argv[3], argv[4]);
     }
     if (operation == 1 && argc >= 2) {
-        return nativeHandle->nativeFetch->read(jsContext, argv[0], argv[1]);
+        return nativeHandle->fetchImpl->read(jsContext, argv[0], argv[1]);
     }
     if (operation == 2 && argc >= 1) {
-        return nativeHandle->nativeFetch->close(jsContext, argv[0]);
+        return nativeHandle->fetchImpl->close(jsContext, argv[0]);
     }
     return JS_ThrowTypeError(jsContext, "Missing native Fetch arguments");
 }
 
 } // namespace
 
-JSValue NativeFetch::start(JSContext* jsContext, JSValueConst url, JSValueConst method, JSValueConst headerPairs, JSValueConst bytes, JSValueConst onHeaders) try {
+JSValue FetchImpl::start(JSContext* jsContext, JSValueConst url, JSValueConst method, JSValueConst headerPairs, JSValueConst bytes, JSValueConst onHeaders) try {
     if (fetchState == nullptr || !fetchState->active || fetchState->jsContext != jsContext) {
         return JS_ThrowInternalError(jsContext, "Native Fetch instance is inactive or belongs to another context");
     }
@@ -693,7 +693,7 @@ JSValue NativeFetch::start(JSContext* jsContext, JSValueConst url, JSValueConst 
     return JS_ThrowInternalError(jsContext, "Unexpected native HTTP start failure");
 }
 
-JSValue NativeFetch::read(JSContext* jsContext, JSValueConst request, JSValueConst onRead) try {
+JSValue FetchImpl::read(JSContext* jsContext, JSValueConst request, JSValueConst onRead) try {
     if (fetchState == nullptr || !fetchState->active || fetchState->jsContext != jsContext) {
         return JS_ThrowInternalError(jsContext, "Native Fetch instance is inactive or belongs to another context");
     }
@@ -760,7 +760,7 @@ JSValue NativeFetch::read(JSContext* jsContext, JSValueConst request, JSValueCon
     return JS_ThrowInternalError(jsContext, "Unexpected native HTTP read failure");
 }
 
-JSValue NativeFetch::close(JSContext* jsContext, JSValueConst request) try {
+JSValue FetchImpl::close(JSContext* jsContext, JSValueConst request) try {
     if (fetchState == nullptr || fetchState->jsContext != jsContext) {
         return JS_ThrowTypeError(jsContext, "Native Fetch belongs to another context");
     }
@@ -789,12 +789,12 @@ JSValue NativeFetch::close(JSContext* jsContext, JSValueConst request) try {
     return JS_ThrowInternalError(jsContext, "Unexpected native HTTP close failure");
 }
 
-JSValue NativeFetch::create(JSContext* jsContext, Scheduler& scheduler) try {
+JSValue FetchImpl::create(JSContext* jsContext, Scheduler& scheduler) try {
     JSRuntime* jsRuntime = JS_GetRuntime(jsContext);
     const JSClassID classID = getClassID(jsRuntime);
     if (!JS_IsRegisteredClass(jsRuntime, classID)) {
         const JSClassDef definition = {
-            .class_name = "NativeFetch",
+            .class_name = "FetchImpl",
             .finalizer = finalizeHandle,
             .gc_mark = nullptr,
             .call = nullptr,
@@ -808,8 +808,8 @@ JSValue NativeFetch::create(JSContext* jsContext, Scheduler& scheduler) try {
     fetchState->jsContext = jsContext;
     fetchState->scheduler = &scheduler;
     std::unique_ptr<NativeHandle> nativeHandle = std::make_unique<NativeHandle>();
-    nativeHandle->nativeFetch = std::make_unique<NativeFetch>();
-    nativeHandle->nativeFetch->fetchState = fetchState;
+    nativeHandle->fetchImpl = std::make_unique<FetchImpl>();
+    nativeHandle->fetchImpl->fetchState = fetchState;
     JSValueOwner object(jsContext, JS_NewObjectProtoClass(jsContext, nullValue, classID));
     if (JS_IsException(object.value)) {
         return exceptionValue;
@@ -863,22 +863,22 @@ JSValue NativeFetch::create(JSContext* jsContext, Scheduler& scheduler) try {
     return JS_ThrowInternalError(jsContext, "Unexpected native Fetch creation failure");
 }
 
-JSModuleDef* NativeFetch::createModule(JSContext* jsContext, Scheduler& scheduler) {
-    JSValueOwner nativeFetch(jsContext, NativeFetch::create(jsContext, scheduler));
-    if (JS_IsException(nativeFetch.value)) {
+JSModuleDef* FetchImpl::createModule(JSContext* jsContext, Scheduler& scheduler) {
+    JSValueOwner fetchImpl(jsContext, FetchImpl::create(jsContext, scheduler));
+    if (JS_IsException(fetchImpl.value)) {
         return nullptr;
     }
     JSModuleDef* module = JS_NewCModule(jsContext, "amj:fetch", [](JSContext* jsContext, JSModuleDef* module) -> int {
-        const JSValue nativeFetch = JS_GetModulePrivateValue(jsContext, module);
-        if (JS_IsException(nativeFetch)) {
+        const JSValue fetchImpl = JS_GetModulePrivateValue(jsContext, module);
+        if (JS_IsException(fetchImpl)) {
             return -1;
         }
-        return JS_SetModuleExport(jsContext, module, "nativeFetch", nativeFetch);
+        return JS_SetModuleExport(jsContext, module, "fetchImpl", fetchImpl);
     });
-    if (module == nullptr || JS_AddModuleExport(jsContext, module, "nativeFetch") < 0) {
+    if (module == nullptr || JS_AddModuleExport(jsContext, module, "fetchImpl") < 0) {
         return nullptr;
     }
-    if (JS_SetModulePrivateValue(jsContext, module, nativeFetch.release()) < 0) {
+    if (JS_SetModulePrivateValue(jsContext, module, fetchImpl.release()) < 0) {
         return nullptr;
     }
     return module;

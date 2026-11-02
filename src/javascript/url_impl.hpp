@@ -10,7 +10,7 @@ namespace amj::javascript {
 // All calls require the JSContext's owner thread. Native failures return
 // JS_EXCEPTION with a pending exception. Limits: 1 MiB UTF-8 input/output/query
 // and 65536 query pairs. Nothing is installed on a target or global object.
-class NativeURL {
+class URLImpl {
   public:
     // input: string; baseOrNull: string or null. Invalid URLs/bases return null.
     // Otherwise returns a plain snapshot with string fields:
@@ -37,7 +37,7 @@ class NativeURL {
     // Used by createModule(). No public URL classes live in C++.
     static JSValue create(JSContext* jsContext);
 
-    // Registers amj:url, exporting nativeURL. Call once per context before loading
+    // Registers amj:url, exporting urlImpl. Call once per context before loading
     // url.js. Returns a context-owned module, or nullptr with a pending exception.
     static JSModuleDef* createModule(JSContext* jsContext);
 };

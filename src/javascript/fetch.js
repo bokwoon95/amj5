@@ -1,8 +1,8 @@
 // @ts-check
-// Fetch over NativeFetch::{start,read,close}. JS owns Promises and API semantics.
+// Fetch over FetchImpl::{start,read,close}. JS owns Promises and API semantics.
 // Dependencies are module imports, never target/global lookups.
 
-import { nativeFetch } from "amj:fetch";
+import { fetchImpl } from "amj:fetch";
 import { URL } from "./url.js";
 import { TextEncoder,TextDecoder } from "./text.js";
 
@@ -182,7 +182,7 @@ class RequestState {
         const request=this.request;
         this.request=null;
         try {
-            if(request!==null) nativeFetch.close(request);
+            if(request!==null) fetchImpl.close(request);
         } finally {
             const signal=this.signal;
             const listener=this.listener;
@@ -246,7 +246,7 @@ class RequestState {
         return new Promise((resolve,reject) => {
             this.reading={ resolve,reject };
             try {
-                nativeFetch.read(request,(failure,chunk) => {
+                fetchImpl.read(request,(failure,chunk) => {
                     const reading=this.reading;
                     this.reading=null;
                     if(reading===null) return;
@@ -428,7 +428,7 @@ export async function fetch(input,init) {
         const metadata=await new Promise((resolve,reject) => {
             state.headers={ resolve,reject };
             try {
-                state.request=nativeFetch.start(url.href,method,Array.from(headers),body,(failure,metadata) => state.receiveHeaders(failure,metadata));
+                state.request=fetchImpl.start(url.href,method,Array.from(headers),body,(failure,metadata) => state.receiveHeaders(failure,metadata));
                 state.attachSignal(signal);
             } catch(error) {
                 state.fail(error);

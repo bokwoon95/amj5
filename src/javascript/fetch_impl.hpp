@@ -13,7 +13,7 @@ struct FetchState;
 // listeners, Error/Response objects, and public argument normalization. Native
 // code owns workers, bounded buffers, and one-shot scheduler completion callbacks.
 // All methods require the scheduler/context owner thread and matching JSContext.
-class NativeFetch {
+class FetchImpl {
   public:
     // url/method: normalized strings; headerPairs: array of two-string arrays;
     // bytes: Uint8Array; onHeaders: function(failureOrNull, metadataOrNull).
@@ -23,7 +23,7 @@ class NativeFetch {
     // No native Promise or JS Error is created. 4xx/5xx are successful responses.
     JSValue start(JSContext* jsContext, JSValueConst url, JSValueConst method, JSValueConst headerPairs, JSValueConst bytes, JSValueConst onHeaders);
 
-    // request: handle from this NativeFetch instance, after successful headers.
+    // request: handle from this FetchImpl instance, after successful headers.
     // onRead: function(failureOrNull, chunkOrNull). One outstanding read is allowed.
     // Later invokes onRead once through the scheduler. chunk is Uint8Array; null
     // with no failure means EOF. Returns undefined, or JS_EXCEPTION on failure.
@@ -35,7 +35,7 @@ class NativeFetch {
     JSValue close(JSContext* jsContext, JSValueConst request);
 
     // Returns a private JS object exposing start/read/close bound to an owned
-    // NativeFetch instance, or JS_EXCEPTION. Used by createModule().
+    // FetchImpl instance, or JS_EXCEPTION. Used by createModule().
     // The scheduler/context are borrowed. Clear/destroy the scheduler before the
     // context. Cleanup invalidates the instance and joins workers without calling
     // JS; recreate after clear(). Completion callbacks hold weak native references,
@@ -47,7 +47,7 @@ class NativeFetch {
     // calls may delay cancellation/join: use off the UI thread.
     static JSValue create(JSContext* jsContext, Scheduler& scheduler);
 
-    // Registers amj:fetch, exporting nativeFetch bound to this scheduler.
+    // Registers amj:fetch, exporting fetchImpl bound to this scheduler.
     // Call once per context before loading fetch.js. Returns a context-owned
     // module, or nullptr with a pending exception. Same lifetime rules as create().
     static JSModuleDef* createModule(JSContext* jsContext, Scheduler& scheduler);

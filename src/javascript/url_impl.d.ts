@@ -1,4 +1,4 @@
-// C++ contract from url.hpp; no JavaScript implementation exists for this module.
+// C++ contract from url_impl.hpp; no JavaScript implementation exists for this module.
 declare module "amj:url" {
     export type QueryPair = [string, string];
     export type URLComponent = "href" | "protocol" | "username" | "password" | "host" | "hostname" | "port" | "pathname" | "search" | "hash";
@@ -15,12 +15,13 @@ declare module "amj:url" {
         search: string;
         hash: string;
     }
-    export const nativeURL: {
+    export interface URLImpl {
         parse(input: string, baseOrNull: string | null): URLParts | null;
         set(href: string, component: URLComponent, value: string): URLParts | null;
         parseQuery(query: string): QueryPair[];
         serializeQuery(pairs: QueryPair[]): string;
-    };
+    }
+    export const urlImpl: URLImpl;
 }
 
 // The host installs these JS exports as globals for user scripts.
