@@ -4,36 +4,29 @@
 
 namespace amj::javascript {
 
-// Stateless Ada operations used by url.js. These methods accept already-coerced
-// scalar-value strings: JS owns constructors, argument coercion, URLSearchParams
-// lists/iteration, and live URL/query synchronization. No scheduler is needed.
-// All calls require the JSContext's owner thread. Native failures return
-// JS_EXCEPTION with a pending exception. Limits: 1 MiB UTF-8 input/output/query
-// and 65536 query pairs. Nothing is installed on a target or global object.
-class URLImpl {
-  public:
-    // input: string; baseOrNull: string or null. Invalid URLs/bases return null.
-    // Otherwise returns a plain JS object matching URLParts in url_impl.d.ts.
-    // search/hash include their leading ?/# when present.
-    static JSValue parse(JSContext* jsContext, JSValueConst input, JSValueConst baseOrNull);
+// Stateless Ada callbacks used by url.js. All require the context's owner thread.
+// Inputs are already-coerced strings; each callback validates its own arguments.
+// Failures return JS_EXCEPTION with a pending exception. Limits: 1 MiB UTF-8
+// input/output/query and 65536 query pairs. Nothing is installed globally.
 
-    // href/component/value: strings. component is one of:
-    // href, protocol, username, password, host, hostname, port, pathname, search, hash.
-    // Returns an updated snapshot with the same shape as parse(), or null if
-    // Ada rejects the URL/change. JS decides whether rejection throws or is ignored.
-    static JSValue set(JSContext* jsContext, JSValueConst href, JSValueConst component, JSValueConst value);
+// input: string; base: optional string (missing/undefined means no base).
+// Returns a plain object matching URLParts in url_impl.d.ts, or null for invalid URLs.
+JSValue urlParse(JSContext* jsContext, JSValueConst thisValue, int argc, JSValueConst* argv);
 
-    // query: string (an optional leading ? is accepted).
-    // Returns [[name, value], ...], preserving duplicates and order, using Ada's
-    // application/x-www-form-urlencoded decoding (including + and invalid UTF-8).
-    static JSValue parseQuery(JSContext* jsContext, JSValueConst query);
+// href/component/value: strings. Returns a new URLParts object, or null when Ada
+// rejects the URL/change. Unknown component names throw. Does not mutate input.
+JSValue urlWithComponent(JSContext* jsContext, JSValueConst thisValue, int argc, JSValueConst* argv);
 
-    // pairs: array of two-string arrays. Returns an encoded query without ?.
-    static JSValue serializeQuery(JSContext* jsContext, JSValueConst pairs);
+// queryString: string, optionally prefixed by '?'. Returns ordered [name, value]
+// pairs, preserving duplicates, using application/x-www-form-urlencoded rules.
+JSValue queryStringParse(JSContext* jsContext, JSValueConst thisValue, int argc, JSValueConst* argv);
 
-    // Registers amj:url_impl, exporting urlImpl. Call once per context before loading
-    // url.js. Returns a context-owned module, or nullptr with a pending exception.
-    static JSModuleDef* createModule(JSContext* jsContext);
-};
+// pairs: array of two-string arrays. Returns an encoded query without '?'.
+JSValue queryStringify(JSContext* jsContext, JSValueConst thisValue, int argc, JSValueConst* argv);
+
+// Registers amj:url_impl with the four named function exports above. Call once
+// per context before loading url.js. Returns a context-owned module, or nullptr
+// with a pending exception. No scheduler is needed.
+JSModuleDef* createURLImplModule(JSContext* jsContext);
 
 } // namespace amj::javascript

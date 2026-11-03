@@ -1,8 +1,8 @@
 // @ts-check
-// Public URL API over URLImpl::{parse,set,parseQuery,serializeQuery}.
+// Public URL API over the native URL and query-string functions.
 // Only Ada parsing/encoding crosses into C++; JS owns all object behavior.
 
-import { urlImpl } from "amj:url_impl";
+import { urlParse, urlWithComponent, queryStringParse, queryStringify } from "amj:url_impl";
 
 /**
  * @typedef {import("amj:url_impl").URLParts} URLParts
@@ -133,10 +133,10 @@ export class URLSearchParams {
           }
         }
       } else {
-        pairs = urlImpl.parseQuery(scalarString(input));
+        pairs = queryStringParse(scalarString(input));
       }
     }
-    urlImpl.serializeQuery(pairs);
+    queryStringify(pairs);
     this.#state.pairs = pairs;
     paramsStates.set(this, this.#state);
   }
@@ -145,7 +145,7 @@ export class URLSearchParams {
    * @returns {void}
    */
   #commit(pairs) {
-    const encoded = urlImpl.serializeQuery(pairs);
+    const encoded = queryStringify(pairs);
     if (this.#state.changed !== null) {
       this.#state.changed(encoded);
     }
@@ -275,7 +275,7 @@ export class URLSearchParams {
     this.#commit(pairs);
   }
   toString() {
-    return urlImpl.serializeQuery(this.#state.pairs);
+    return queryStringify(this.#state.pairs);
   }
   /**
    * @param {(this: unknown, value: string, name: string, params: URLSearchParams) => void} callback
@@ -354,8 +354,8 @@ export class URL {
       throw new TypeError("URL requires an input");
     }
     const inputText = scalarString(input);
-    const baseText = base === undefined ? null : scalarString(base);
-    const parts = urlImpl.parse(inputText, baseText);
+    const baseText = base === undefined ? undefined : scalarString(base);
+    const parts = urlParse(inputText, baseText);
     if (parts === null) {
       throw new TypeError("Invalid URL");
     }
@@ -366,7 +366,7 @@ export class URL {
       throw new TypeError("Missing URL query state");
     }
     paramsState.changed = (encoded) => {
-      const updated = urlImpl.set(this.#parts.href, "search", encoded);
+      const updated = urlWithComponent(this.#parts.href, "search", encoded);
       if (updated === null) {
         throw new TypeError("Invalid URL query");
       }
@@ -380,7 +380,7 @@ export class URL {
    */
   #set(component, value) {
     const valueText = scalarString(value); // Coercion can mutate the URL; read href afterward.
-    const updated = urlImpl.set(this.#parts.href, component, valueText);
+    const updated = urlWithComponent(this.#parts.href, component, valueText);
     if (updated === null) {
       if (component === "href") {
         throw new TypeError("Invalid URL");
@@ -388,8 +388,8 @@ export class URL {
       return;
     }
     if (component === "href" || component === "search") {
-      const pairs = urlImpl.parseQuery(updated.search);
-      urlImpl.serializeQuery(pairs);
+      const pairs = queryStringParse(updated.search);
+      queryStringify(pairs);
       const paramsState = paramsStates.get(this.#searchParams);
       if (paramsState === undefined) {
         throw new TypeError("Missing URL query state");
@@ -408,8 +408,8 @@ export class URL {
       throw new TypeError("URL.canParse requires an input");
     }
     const inputText = scalarString(input);
-    const baseText = base === undefined ? null : scalarString(base);
-    return urlImpl.parse(inputText, baseText) !== null;
+    const baseText = base === undefined ? undefined : scalarString(base);
+    return urlParse(inputText, baseText) !== null;
   }
   /**
    * @param {unknown} input
@@ -421,8 +421,8 @@ export class URL {
       throw new TypeError("URL.parse requires an input");
     }
     const inputText = scalarString(input);
-    const baseText = base === undefined ? null : scalarString(base);
-    const parts = urlImpl.parse(inputText, baseText);
+    const baseText = base === undefined ? undefined : scalarString(base);
+    const parts = urlParse(inputText, baseText);
     if (parts === null) {
       return null;
     }

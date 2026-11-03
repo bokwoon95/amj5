@@ -6,19 +6,22 @@ The host chooses which target receives those exports.
 
 ## Modules and native/JS boundary
 
-| Module name        | Implementation          | Exports                      |
-| ------------------ | ----------------------- | ---------------------------- |
-| `amj:text`         | `text.js`               | `TextEncoder`, `TextDecoder` |
-| `amj:url_impl`     | `url_impl.hpp/.cpp`     | `urlImpl`                    |
-| `amj:url`          | `url.js`                | `URL`, `URLSearchParams`     |
-| `amj:timeout_impl` | `timeout_impl.hpp/.cpp` | `timeoutImpl`                |
-| `amj:timeout`      | `timeout.js`            | `setTimeout`, `clearTimeout` |
-| `amj:fetch_impl`   | `fetch_impl.hpp/.cpp`   | `fetchImpl`                  |
-| `amj:fetch`        | `fetch.js`              | `Headers`, `fetch`           |
+| Module name        | Implementation          | Exports                                                              |
+| ------------------ | ----------------------- | -------------------------------------------------------------------- |
+| `amj:text`         | `text.js`               | `TextEncoder`, `TextDecoder`                                         |
+| `amj:url_impl`     | `url_impl.hpp/.cpp`     | `urlParse`, `urlWithComponent`, `queryStringParse`, `queryStringify` |
+| `amj:url`          | `url.js`                | `URL`, `URLSearchParams`                                             |
+| `amj:timeout_impl` | `timeout_impl.hpp/.cpp` | `timeoutImpl`                                                        |
+| `amj:timeout`      | `timeout.js`            | `setTimeout`, `clearTimeout`                                         |
+| `amj:fetch_impl`   | `fetch_impl.hpp/.cpp`   | `fetchImpl`                                                          |
+| `amj:fetch`        | `fetch.js`              | `Headers`, `fetch`                                                   |
 
-`URLImpl::createModule(jsContext)` registers `amj:url_impl`. Its stateless Ada
-operations are `parse`, `set`, `parseQuery`, and `serializeQuery`. `url.js` imports
-that object and implements coercion, iteration, and live query synchronization.
+`createURLImplModule(jsContext)` registers `amj:url_impl` with four named functions:
+`urlParse`, `urlWithComponent`, `queryStringParse`, and `queryStringify`. Each is a
+direct QuickJS callback, without magic dispatch or an exported wrapper object.
+`urlParse` accepts an omitted/undefined base; invalid URLs and rejected component
+updates return null. `url.js` implements coercion, iteration, and live query
+synchronization.
 
 `FetchImpl::createModule(jsContext, scheduler)` registers `amj:fetch_impl`.
 `fetchImpl.start/read/close` belong to one HTTP owner. `fetch.js` imports that
@@ -37,7 +40,7 @@ it defensively validates normalized input and enforces the 128-timer limit.
 Register each C++ module once per context before loading its consumers. Check
 for nullptr and a pending JS exception. Module definitions belong to the context,
 not the caller. Each implementation constructs its JS exports inside
-`createModule()`. All native instances use the same context and owner thread
+its module-registration function. All native instances use the same context and owner thread
 as their scheduler.
 
 The embedding host must supply a QuickJS module loader that maps `amj:text`,
@@ -65,7 +68,13 @@ the JS facade. C++ headers retain types only when native code uses them:
 - Fetch: `FetchFailure` and `FetchResponseMetadata` hold native completion data.
   `FetchRequestHandle` is a TypeScript-only description of an opaque JS handle.
 - URL: `URLParts` and `URLComponent` are TypeScript-only types. Native code
-  constructs JS objects directly from Ada URLs and accepts component strings.
+  builds JSONValue maps from Ada URLs and accepts component strings.
+
+`javascript.hpp/.cpp` provides `JSONValue`, an in-memory tree of null, bool,
+finite double, string, array, and string-keyed map values. `jsonToJSValue` converts
+it directly to QuickJS values without JSON text serialization. Conversion owns
+partial-result cleanup, creates null-prototype objects, and rejects nesting
+beyond 128 levels. Map keys are emitted in sorted order.
 
 C++ uses standard pairs/vectors; JS uses inline `[string, string]` tuple/array
 types rather than pair aliases. Internal `FetchImplState`, `FetchRequestState`,

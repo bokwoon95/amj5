@@ -17,12 +17,8 @@ declare module "amj:url_impl" {
     hash: string;
   }
 
-  export interface URLImpl {
-    parse(input: string, baseOrNull: string | null): URLParts | null;
-    set(href: string, component: URLComponent, value: string): URLParts | null;
-    parseQuery(query: string): [string, string][];
-    serializeQuery(pairs: [string, string][]): string;
-  }
-
-  export const urlImpl: URLImpl;
+  export function urlParse(input: string, base?: string | undefined): URLParts | null;
+  export function urlWithComponent(href: string, component: URLComponent, value: string): URLParts | null;
+  export function queryStringParse(queryString: string): Array<[string, string]>;
+  export function queryStringify(pairs: Array<[string, string]>): string;
 }
