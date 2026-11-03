@@ -1,8 +1,5 @@
 // JavaScript representation of the boundary types and operations in url_impl.hpp.
 declare module "amj:url_impl" {
-  export type URLComponent =
-    "href" | "protocol" | "username" | "password" | "host" | "hostname" | "port" | "pathname" | "search" | "hash";
-
   export interface URLParts {
     href: string;
     origin: string;
@@ -18,7 +15,10 @@ declare module "amj:url_impl" {
   }
 
   export function urlParse(input: string, base?: string | undefined): URLParts | null;
-  export function urlWithComponent(href: string, component: URLComponent, value: string): URLParts | null;
+
+  export function urlWithComponent(href: string, component: string, value: string): URLParts | null;
+
   export function queryStringParse(queryString: string): Array<[string, string]>;
+
   export function queryStringify(entries: Array<[string, string]>): string;
 }
