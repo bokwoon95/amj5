@@ -90,8 +90,8 @@ JSValue convertJSON(JSContext* jsContext, const JSONValue& jsonValue, int depth)
 
 } // namespace
 
-JSValue jsonToJSValue(JSContext* jsContext, const JSONValue& jsonValue) try {
-    return convertJSON(jsContext, jsonValue, 0);
+JSValue JSONValue::toJSValue(JSContext* jsContext) const try {
+    return convertJSON(jsContext, *this, 0);
 } catch (const std::bad_alloc&) {
     return JS_ThrowOutOfMemory(jsContext);
 } catch (const std::exception& exception) {

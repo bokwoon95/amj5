@@ -21,12 +21,6 @@
 #include <vector>
 
 namespace amj::javascript {
-namespace {
-
-constexpr std::size_t inputLimit = 1048576;
-constexpr int64_t pairLimit = 65536;
-
-} // namespace
 
 JSValue urlParse(JSContext* jsContext, JSValueConst /* thisValue */, int argc, JSValueConst* argv) try {
     if (argc < 1) {
@@ -35,16 +29,34 @@ JSValue urlParse(JSContext* jsContext, JSValueConst /* thisValue */, int argc, J
     if (!JS_IsString(argv[0])) {
         return JS_ThrowTypeError(jsContext, "urlParse: arg0: input must be a string");
     }
-    const std::optional<std::string> inputText = jsValueToString(jsContext, argv[0]);
-    if (!inputText.has_value()) {
+    const std::optional<std::string> input = jsValueToString(jsContext, argv[0]);
+    if (!input.has_value()) {
         return JS_EXCEPTION;
     }
-    if (inputText.value().size() > inputLimit) {
+    if (input.value().size() > (1U << 20U /* 1 MiB */)) {
         return JS_ThrowRangeError(jsContext, "urlParse: arg0: input exceeds 1 MB");
     }
-    ada::result<ada::url_aggregator> parsed;
+    std::optional<ada::url_aggregator> baseURL = std::nullopt;
+    if (argc >= 2 && !JS_IsUndefined(argv[1])) {
+        if (!JS_IsString(argv[1])) {
+            return JS_ThrowTypeError(jsContext, "urlParse: arg1: base must be a string or undefined");
+        }
+        const std::optional<std::string> base = jsValueToString(jsContext, argv[1]);
+        if (!base.has_value()) {
+            return JS_EXCEPTION;
+        }
+        if (base.value().size() > (1U << 20U /* 1 MiB */)) {
+            return JS_ThrowRangeError(jsContext, "urlParse: arg1: base exceeds 1 MB");
+        }
+        const ada::result<ada::url_aggregator> uri = ada::parse<ada::url_aggregator>(base.value(), nullptr);
+        if (!uri.has_value()) {
+            return JS_NULL;
+        }
+        baseURL = uri.value();
+    }
+    ada::result<ada::url_aggregator> parsedURL;
     if (argc < 2 || JS_IsUndefined(argv[1])) {
-        parsed = ada::parse<ada::url_aggregator>(inputText.value(), nullptr);
+        parsedURL = ada::parse<ada::url_aggregator>(input.value(), nullptr);
     } else {
         if (!JS_IsString(argv[1])) {
             return JS_ThrowTypeError(jsContext, "urlParse: arg1: base must be a string or undefined");
@@ -53,39 +65,40 @@ JSValue urlParse(JSContext* jsContext, JSValueConst /* thisValue */, int argc, J
         if (!baseText.has_value()) {
             return JS_EXCEPTION;
         }
-        if (baseText.value().size() > inputLimit) {
+        if (baseText.value().size() > (1U << 20U /* 1 MiB */)) {
             return JS_ThrowRangeError(jsContext, "urlParse: arg1: base exceeds 1 MB");
         }
         const ada::result<ada::url_aggregator> base = ada::parse<ada::url_aggregator>(baseText.value(), nullptr);
         if (!base.has_value()) {
             return JS_NULL;
         }
-        parsed = ada::parse<ada::url_aggregator>(inputText.value(), &base.value());
+        parsedURL = ada::parse<ada::url_aggregator>(input.value(), &base.value());
     }
-    if (!parsed.has_value()) {
+    if (!parsedURL.has_value()) {
         return JS_NULL;
     }
-    if (parsed.value().get_href().size() > inputLimit) {
+    if (parsedURL.value().get_href().size() > (1U << 20U /* 1 MiB */)) {
         return JS_ThrowRangeError(jsContext, "urlParse: result exceeds 1 MB");
     }
-    const std::string_view search = parsed.value().get_search();
-    if (std::count(search.begin(), search.end(), '&') >= pairLimit) {
+    const std::string_view search = parsedURL.value().get_search();
+    if (std::count(search.begin(), search.end(), '&') >= 65536) {
         return JS_ThrowRangeError(jsContext, "urlParse: result.search exceeds 65536 pairs");
     }
-    const ada::url_aggregator& url = parsed.value();
-    return jsonToJSValue(jsContext, JSONValue(std::map<std::string, JSONValue>{
-        {"href", std::string(url.get_href())},
-        {"origin", url.get_origin()},
-        {"protocol", std::string(url.get_protocol())},
-        {"username", std::string(url.get_username())},
-        {"password", std::string(url.get_password())},
-        {"host", std::string(url.get_host())},
-        {"hostname", std::string(url.get_hostname())},
-        {"port", std::string(url.get_port())},
-        {"pathname", std::string(url.get_pathname())},
-        {"search", std::string(url.get_search())},
-        {"hash", std::string(url.get_hash())},
-    }));
+    const ada::url_aggregator& uri = parsedURL.value();
+    const std::map<std::string, JSONValue> urlParts = {
+        {"href", std::string(uri.get_href())},
+        {"origin", uri.get_origin()},
+        {"protocol", std::string(uri.get_protocol())},
+        {"username", std::string(uri.get_username())},
+        {"password", std::string(uri.get_password())},
+        {"host", std::string(uri.get_host())},
+        {"hostname", std::string(uri.get_hostname())},
+        {"port", std::string(uri.get_port())},
+        {"pathname", std::string(uri.get_pathname())},
+        {"search", std::string(uri.get_search())},
+        {"hash", std::string(uri.get_hash())},
+    };
+    return JSONValue(urlParts).toJSValue(jsContext);
 } catch (const std::bad_alloc&) {
     return JS_ThrowOutOfMemory(jsContext);
 } catch (const std::exception& exception) {
@@ -105,7 +118,7 @@ JSValue urlWithComponent(JSContext* jsContext, JSValueConst /* thisValue */, int
     if (!hrefText.has_value()) {
         return JS_EXCEPTION;
     }
-    if (hrefText.value().size() > inputLimit) {
+    if (hrefText.value().size() > (1U << 20U /* 1 MiB */)) {
         return JS_ThrowRangeError(jsContext, "urlWithComponent: arg0: href exceeds 1 MB");
     }
     if (!JS_IsString(argv[1])) {
@@ -115,7 +128,7 @@ JSValue urlWithComponent(JSContext* jsContext, JSValueConst /* thisValue */, int
     if (!componentText.has_value()) {
         return JS_EXCEPTION;
     }
-    if (componentText.value().size() > inputLimit) {
+    if (componentText.value().size() > (1U << 20U /* 1 MiB */)) {
         return JS_ThrowRangeError(jsContext, "urlWithComponent: arg1: component exceeds 1 MB");
     }
     if (!JS_IsString(argv[2])) {
@@ -125,7 +138,7 @@ JSValue urlWithComponent(JSContext* jsContext, JSValueConst /* thisValue */, int
     if (!valueText.has_value()) {
         return JS_EXCEPTION;
     }
-    if (valueText.value().size() > inputLimit) {
+    if (valueText.value().size() > (1U << 20U /* 1 MiB */)) {
         return JS_ThrowRangeError(jsContext, "urlWithComponent: arg2: value exceeds 1 MB");
     }
     ada::result<ada::url_aggregator> parsed = ada::parse<ada::url_aggregator>(hrefText.value(), nullptr);
@@ -160,26 +173,27 @@ JSValue urlWithComponent(JSContext* jsContext, JSValueConst /* thisValue */, int
     if (!accepted) {
         return JS_NULL;
     }
-    if (url.get_href().size() > inputLimit) {
+    if (url.get_href().size() > (1U << 20U /* 1 MiB */)) {
         return JS_ThrowRangeError(jsContext, "urlWithComponent: result exceeds 1 MB");
     }
     const std::string_view search = url.get_search();
-    if (std::count(search.begin(), search.end(), '&') >= pairLimit) {
+    if (std::count(search.begin(), search.end(), '&') >= 65536) {
         return JS_ThrowRangeError(jsContext, "urlWithComponent: result.search exceeds 65536 pairs");
     }
-    return jsonToJSValue(jsContext, JSONValue(std::map<std::string, JSONValue>{
-        {"href", std::string(url.get_href())},
-        {"origin", url.get_origin()},
-        {"protocol", std::string(url.get_protocol())},
-        {"username", std::string(url.get_username())},
-        {"password", std::string(url.get_password())},
-        {"host", std::string(url.get_host())},
-        {"hostname", std::string(url.get_hostname())},
-        {"port", std::string(url.get_port())},
-        {"pathname", std::string(url.get_pathname())},
-        {"search", std::string(url.get_search())},
-        {"hash", std::string(url.get_hash())},
-    }));
+    return JSONValue(std::map<std::string, JSONValue>{
+                         {"href", std::string(url.get_href())},
+                         {"origin", url.get_origin()},
+                         {"protocol", std::string(url.get_protocol())},
+                         {"username", std::string(url.get_username())},
+                         {"password", std::string(url.get_password())},
+                         {"host", std::string(url.get_host())},
+                         {"hostname", std::string(url.get_hostname())},
+                         {"port", std::string(url.get_port())},
+                         {"pathname", std::string(url.get_pathname())},
+                         {"search", std::string(url.get_search())},
+                         {"hash", std::string(url.get_hash())},
+                     })
+        .toJSValue(jsContext);
 } catch (const std::bad_alloc&) {
     return JS_ThrowOutOfMemory(jsContext);
 } catch (const std::exception& exception) {
@@ -199,10 +213,10 @@ JSValue queryStringParse(JSContext* jsContext, JSValueConst /* thisValue */, int
     if (!text.has_value()) {
         return JS_EXCEPTION;
     }
-    if (text.value().size() > inputLimit) {
+    if (text.value().size() > (1U << 20U /* 1 MiB */)) {
         return JS_ThrowRangeError(jsContext, "queryStringParse: arg0: queryString exceeds 1 MB");
     }
-    if (std::count(text.value().begin(), text.value().end(), '&') >= pairLimit) {
+    if (std::count(text.value().begin(), text.value().end(), '&') >= 65536) {
         return JS_ThrowRangeError(jsContext, "queryStringParse: arg0: queryString exceeds 65536 pairs");
     }
     const ada::url_search_params searchParams(text.value());
@@ -210,7 +224,7 @@ JSValue queryStringParse(JSContext* jsContext, JSValueConst /* thisValue */, int
     for (const std::pair<std::string, std::string>& pair : searchParams) {
         pairs.push_back(JSONValue(std::vector<JSONValue>{pair.first, pair.second}));
     }
-    return jsonToJSValue(jsContext, JSONValue(pairs));
+    return JSONValue(pairs).toJSValue(jsContext);
 } catch (const std::bad_alloc&) {
     return JS_ThrowOutOfMemory(jsContext);
 } catch (const std::exception& exception) {
@@ -231,7 +245,7 @@ JSValue queryStringify(JSContext* jsContext, JSValueConst /* thisValue */, int a
     if (JS_GetLength(jsContext, pairs, &count) < 0) {
         return JS_EXCEPTION;
     }
-    if (count < 0 || count > pairLimit) {
+    if (count < 0 || count > 65536) {
         return JS_ThrowRangeError(jsContext, "queryStringify: arg0: pairs exceeds 65536 pairs");
     }
     ada::url_search_params searchParams;
@@ -262,7 +276,7 @@ JSValue queryStringify(JSContext* jsContext, JSValueConst /* thisValue */, int a
         if (!nameText.has_value()) {
             return JS_EXCEPTION;
         }
-        if (nameText.value().size() > inputLimit) {
+        if (nameText.value().size() > (1U << 20U /* 1 MiB */)) {
             return JS_ThrowRangeError(jsContext, "queryStringify: arg0: pairs[%lld][0] exceeds 1 MB", static_cast<long long>(index));
         }
         const AutoJSValue value(jsContext, JS_GetPropertyUint32(jsContext, pair.value, 1));
@@ -276,11 +290,11 @@ JSValue queryStringify(JSContext* jsContext, JSValueConst /* thisValue */, int a
         if (!valueText.has_value()) {
             return JS_EXCEPTION;
         }
-        if (valueText.value().size() > inputLimit) {
+        if (valueText.value().size() > (1U << 20U /* 1 MiB */)) {
             return JS_ThrowRangeError(jsContext, "queryStringify: arg0: pairs[%lld][1] exceeds 1 MB", static_cast<long long>(index));
         }
         for (const std::string* field : {&nameText.value(), &valueText.value()}) {
-            if (field->size() > inputLimit - bytes) {
+            if (field->size() > (1U << 20U /* 1 MiB */) - bytes) {
                 return JS_ThrowRangeError(jsContext, "queryStringify: arg0: pairs exceeds 1 MB");
             }
             bytes += field->size();
@@ -288,10 +302,10 @@ JSValue queryStringify(JSContext* jsContext, JSValueConst /* thisValue */, int a
         searchParams.append(nameText.value(), valueText.value());
     }
     const std::string encoded = searchParams.to_string();
-    if (encoded.size() > inputLimit) {
+    if (encoded.size() > (1U << 20U /* 1 MiB */)) {
         return JS_ThrowRangeError(jsContext, "queryStringify: result exceeds 1 MB");
     }
-    return jsonToJSValue(jsContext, JSONValue(encoded));
+    return JSONValue(encoded).toJSValue(jsContext);
 } catch (const std::bad_alloc&) {
     return JS_ThrowOutOfMemory(jsContext);
 } catch (const std::exception& exception) {

@@ -76,11 +76,11 @@ struct JSONValue { // NOLINT(bugprone-exception-escape)
     JSONValue(std::map<std::string, JSONValue> object) {
         this->value = std::move(object);
     }
-};
 
-// Creates an owned JS value. Objects have a null prototype. Returns JS_EXCEPTION
-// with a pending exception on failure, including nesting deeper than 128 levels.
-JSValue jsonToJSValue(JSContext* jsContext, const JSONValue& jsonValue);
+    // Creates an owned JS value. Objects have a null prototype. Returns JS_EXCEPTION
+    // with a pending exception on failure, including nesting deeper than 128 levels.
+    JSValue toJSValue(JSContext* jsContext) const;
+};
 
 // Converts to UTF-8 without type validation or size limits. Returns nullopt on
 // failure with a pending JS exception. Check JS_IsString() first if coercion is unwanted.

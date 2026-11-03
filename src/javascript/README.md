@@ -71,7 +71,7 @@ the JS facade. C++ headers retain types only when native code uses them:
   builds JSONValue maps from Ada URLs and accepts component strings.
 
 `javascript.hpp/.cpp` provides `JSONValue`, an in-memory tree of null, bool,
-finite double, string, array, and string-keyed map values. `jsonToJSValue` converts
+finite double, string, array, and string-keyed map values. `JSONValue::toJSValue()` converts
 it directly to QuickJS values without JSON text serialization. Conversion owns
 partial-result cleanup, creates null-prototype objects, and rejects nesting
 beyond 128 levels. Map keys are emitted in sorted order.
