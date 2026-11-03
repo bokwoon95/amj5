@@ -29,7 +29,7 @@ JSValue urlParse(JSContext* jsContext, JSValueConst /* thisValue */, int argc, J
     if (!JS_IsString(argv[0])) {
         return JS_ThrowTypeError(jsContext, "urlParse: arg0: input must be a string");
     }
-    const std::optional<std::string> input = jsValueToString(jsContext, argv[0]);
+    const std::optional<std::string> input = jsstring(jsContext, argv[0]);
     if (!input.has_value()) {
         return JS_EXCEPTION;
     }
@@ -41,7 +41,7 @@ JSValue urlParse(JSContext* jsContext, JSValueConst /* thisValue */, int argc, J
         if (!JS_IsString(argv[1])) {
             return JS_ThrowTypeError(jsContext, "urlParse: arg1: base must be a string or undefined");
         }
-        const std::optional<std::string> base = jsValueToString(jsContext, argv[1]);
+        const std::optional<std::string> base = jsstring(jsContext, argv[1]);
         if (!base.has_value()) {
             return JS_EXCEPTION;
         }
@@ -61,7 +61,7 @@ JSValue urlParse(JSContext* jsContext, JSValueConst /* thisValue */, int argc, J
         if (!JS_IsString(argv[1])) {
             return JS_ThrowTypeError(jsContext, "urlParse: arg1: base must be a string or undefined");
         }
-        const std::optional<std::string> baseText = jsValueToString(jsContext, argv[1]);
+        const std::optional<std::string> baseText = jsstring(jsContext, argv[1]);
         if (!baseText.has_value()) {
             return JS_EXCEPTION;
         }
@@ -114,7 +114,7 @@ JSValue urlWithComponent(JSContext* jsContext, JSValueConst /* thisValue */, int
     if (!JS_IsString(argv[0])) {
         return JS_ThrowTypeError(jsContext, "urlWithComponent: arg0: href must be a string");
     }
-    const std::optional<std::string> hrefText = jsValueToString(jsContext, argv[0]);
+    const std::optional<std::string> hrefText = jsstring(jsContext, argv[0]);
     if (!hrefText.has_value()) {
         return JS_EXCEPTION;
     }
@@ -124,7 +124,7 @@ JSValue urlWithComponent(JSContext* jsContext, JSValueConst /* thisValue */, int
     if (!JS_IsString(argv[1])) {
         return JS_ThrowTypeError(jsContext, "urlWithComponent: arg1: component must be a string");
     }
-    const std::optional<std::string> componentText = jsValueToString(jsContext, argv[1]);
+    const std::optional<std::string> componentText = jsstring(jsContext, argv[1]);
     if (!componentText.has_value()) {
         return JS_EXCEPTION;
     }
@@ -134,7 +134,7 @@ JSValue urlWithComponent(JSContext* jsContext, JSValueConst /* thisValue */, int
     if (!JS_IsString(argv[2])) {
         return JS_ThrowTypeError(jsContext, "urlWithComponent: arg2: value must be a string");
     }
-    const std::optional<std::string> valueText = jsValueToString(jsContext, argv[2]);
+    const std::optional<std::string> valueText = jsstring(jsContext, argv[2]);
     if (!valueText.has_value()) {
         return JS_EXCEPTION;
     }
@@ -209,7 +209,7 @@ JSValue queryStringParse(JSContext* jsContext, JSValueConst /* thisValue */, int
     if (!JS_IsString(argv[0])) {
         return JS_ThrowTypeError(jsContext, "queryStringParse: arg0: queryString must be a string");
     }
-    const std::optional<std::string> text = jsValueToString(jsContext, argv[0]);
+    const std::optional<std::string> text = jsstring(jsContext, argv[0]);
     if (!text.has_value()) {
         return JS_EXCEPTION;
     }
@@ -272,7 +272,7 @@ JSValue queryStringify(JSContext* jsContext, JSValueConst /* thisValue */, int a
         if (!JS_IsString(name.value)) {
             return JS_ThrowTypeError(jsContext, "queryStringify: arg0: pairs[%lld][0] must be a string", static_cast<long long>(index));
         }
-        const std::optional<std::string> nameText = jsValueToString(jsContext, name.value);
+        const std::optional<std::string> nameText = jsstring(jsContext, name.value);
         if (!nameText.has_value()) {
             return JS_EXCEPTION;
         }
@@ -286,7 +286,7 @@ JSValue queryStringify(JSContext* jsContext, JSValueConst /* thisValue */, int a
         if (!JS_IsString(value.value)) {
             return JS_ThrowTypeError(jsContext, "queryStringify: arg0: pairs[%lld][1] must be a string", static_cast<long long>(index));
         }
-        const std::optional<std::string> valueText = jsValueToString(jsContext, value.value);
+        const std::optional<std::string> valueText = jsstring(jsContext, value.value);
         if (!valueText.has_value()) {
             return JS_EXCEPTION;
         }

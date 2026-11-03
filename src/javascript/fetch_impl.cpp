@@ -371,7 +371,7 @@ errors::Error deliver(const std::shared_ptr<FetchRequestState>& fetchRequestStat
     if (failure.has_value()) {
         failureValue.value = JS_NewObjectProto(jsContext, nullValue);
         if (!JS_IsException(failureValue.value)) {
-            if (!setJSStringField(failureValue, "type", failure.value().type) || !setJSStringField(failureValue, "message", failure.value().message)) {
+            if (!setstringfield(failureValue, "type", failure.value().type) || !setstringfield(failureValue, "message", failure.value().message)) {
                 return errors::Error{
                     .errorCode = ErrorCode::JSException,
                     .errorMessage = "Could not convert HTTP completion data",
@@ -474,7 +474,7 @@ JSValue FetchImpl::start(JSContext* jsContext, JSValueConst url, JSValueConst me
     if (!JS_IsString(url)) {
         return JS_ThrowTypeError(jsContext, "FetchImpl.start: argument 'url' must be a string");
     }
-    const std::optional<std::string> urlText = jsValueToString(jsContext, url);
+    const std::optional<std::string> urlText = jsstring(jsContext, url);
     if (!urlText.has_value()) {
         return exceptionValue;
     }
@@ -484,7 +484,7 @@ JSValue FetchImpl::start(JSContext* jsContext, JSValueConst url, JSValueConst me
     if (!JS_IsString(method)) {
         return JS_ThrowTypeError(jsContext, "FetchImpl.start: argument 'method' must be a string");
     }
-    const std::optional<std::string> methodText = jsValueToString(jsContext, method);
+    const std::optional<std::string> methodText = jsstring(jsContext, method);
     if (!methodText.has_value()) {
         return exceptionValue;
     }
@@ -546,7 +546,7 @@ JSValue FetchImpl::start(JSContext* jsContext, JSValueConst url, JSValueConst me
         if (!JS_IsString(name.value)) {
             return JS_ThrowTypeError(jsContext, "FetchImpl.start: header name must be a string");
         }
-        const std::optional<std::string> nameText = jsValueToString(jsContext, name.value);
+        const std::optional<std::string> nameText = jsstring(jsContext, name.value);
         if (!nameText.has_value()) {
             return exceptionValue;
         }
@@ -556,7 +556,7 @@ JSValue FetchImpl::start(JSContext* jsContext, JSValueConst url, JSValueConst me
         if (!JS_IsString(value.value)) {
             return JS_ThrowTypeError(jsContext, "FetchImpl.start: header value must be a string");
         }
-        const std::optional<std::string> valueText = jsValueToString(jsContext, value.value);
+        const std::optional<std::string> valueText = jsstring(jsContext, value.value);
         if (!valueText.has_value()) {
             return exceptionValue;
         }

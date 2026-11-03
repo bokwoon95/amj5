@@ -100,7 +100,7 @@ JSValue JSONValue::toJSValue(JSContext* jsContext) const try {
     return JS_ThrowInternalError(jsContext, "Unexpected JSON conversion failure");
 }
 
-std::optional<std::string> jsValueToString(JSContext* jsContext, JSValueConst value) {
+std::optional<std::string> jsstring(JSContext* jsContext, JSValueConst value) {
     std::size_t length = 0;
     const char* text = JS_ToCStringLen(jsContext, &length, value);
     if (text == nullptr) {
@@ -113,7 +113,7 @@ std::optional<std::string> jsValueToString(JSContext* jsContext, JSValueConst va
     return std::string(text, length);
 }
 
-bool setJSStringField(const AutoJSValue& obj, const char* key, std::string_view value) {
+bool setstringfield(const AutoJSValue& obj, const char* key, std::string_view value) {
     const JSValue text = JS_NewStringLen(obj.jsContext, value.data(), value.size());
     if (JS_IsException(text)) {
         return false;
