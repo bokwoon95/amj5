@@ -14,9 +14,9 @@ import { queryStringParse, queryStringify, urlParse, urlWithComponent } from "am
 let getQueryString;
 
 /**
- * @type {(urlSearchParams: URLSearchParams, urlParts: URLParts, replaceEntries: boolean) => string}
+ * @type {(urlSearchParams: URLSearchParams, queryString: string) => void}
  */
-let setRawQuery;
+let setQueryString;
 
 export class URLSearchParams {
   /**
@@ -30,22 +30,10 @@ export class URLSearchParams {
     getQueryString = function (urlSearchParams) {
       return urlSearchParams.#queryString;
     };
-    setRawQuery = (urlSearchParams, urlParts, replaceEntries) => {
-      // Unlike parts.search, the href distinguishes an empty '?' from no query.
-      const hashIndex = urlParts.href.indexOf("#");
-      const queryEnd = hashIndex === -1 ? urlParts.href.length : hashIndex;
-      const queryIndex = urlParts.href.indexOf("?");
-      const hasQuery = queryIndex !== -1 && queryIndex < queryEnd;
-      const rawQuery = hasQuery ? urlParts.href.slice(queryIndex, queryEnd) : "";
-      let entries = urlSearchParams.#entries;
-      if (replaceEntries) {
-        entries = queryStringParse(rawQuery);
-        queryStringify(entries);
-      }
+    setQueryString = function (urlSearchParams, queryString) {
+      const entries = queryStringParse(queryString);
       urlSearchParams.#entries = entries;
-      urlSearchParams.#queryString = rawQuery;
-      // Replace query contents with a bare delimiter; URL installs the current query.
-      return hasQuery ? urlParts.href.slice(0, queryIndex + 1) + urlParts.href.slice(queryEnd) : urlParts.href;
+      urlSearchParams.#queryString = queryString;
     };
   }
 
@@ -64,14 +52,14 @@ export class URLSearchParams {
     if (entriesIteratorFunction === null || entriesIteratorFunction === undefined) {
       for (const name of Object.keys(options)) {
         if (this.#entries.length > 65535) {
-          throw new RangeError("queryString has too many entries");
+          throw new RangeError("URLSearchParams.constructor: queryString has too many entries");
         }
         this.#entries.push([stringify(name), stringify(Reflect.get(options, name))]);
       }
       return;
     }
     if (typeof entriesIteratorFunction !== "function") {
-      throw new TypeError("options is not an iterable");
+      throw new TypeError("URLSearchParams.constructor: options is not an iterable");
     }
     const entriesIterable = {
       [Symbol.iterator]: function () {
@@ -82,17 +70,17 @@ export class URLSearchParams {
     for (const entry of entriesIterable) {
       i++;
       if (this.#entries.length > 65535) {
-        throw new RangeError("queryString has too many entries");
+        throw new RangeError("URLSearchParams.constructor: queryString has too many entries");
       }
       if (entry === null) {
-        throw new TypeError(`entry #${i + 1} is null`);
+        throw new TypeError(`URLSearchParams.constructor: entry #${i + 1} is null`);
       }
       if (typeof entry !== "object" && typeof entry !== "function") {
-        throw new TypeError(`entry #${i + 1} is not an iterable`);
+        throw new TypeError(`URLSearchParams.constructor: entry #${i + 1} is not an iterable`);
       }
       const entryIteratorFunction = Reflect.get(entry, Symbol.iterator);
       if (typeof entryIteratorFunction != "function") {
-        throw new TypeError(`entry #${i + 1} is not an iterable`);
+        throw new TypeError(`URLSearchParams.constructor: entry #${i + 1} is not an iterable`);
       }
       const entryIterable = {
         [Symbol.iterator]: function () {
@@ -109,23 +97,19 @@ export class URLSearchParams {
         } else if (j === 1) {
           value = stringify(field);
         } else {
-          throw new TypeError(`entry #${i + 1} has more than two fields`);
+          throw new TypeError(`URLSearchParams.constructor: entry #${i + 1} has more than two fields`);
         }
       }
       if (j < 1) {
-        throw new TypeError(`entry #${i + 1} has less than two fields`);
+        throw new TypeError(`URLSearchParams.constructor: entry #${i + 1} has less than two fields`);
       }
       this.#entries.push([name, value]);
     }
   }
 
-  get [Symbol.toStringTag]() {
-    return "URLSearchParams";
-  }
+  get [Symbol.toStringTag]() { return "URLSearchParams"; }
 
-  get size() {
-    return this.#entries.length;
-  }
+  get size() { return this.#entries.length; }
 
   [Symbol.iterator]() {
     return this.entries();
@@ -174,13 +158,19 @@ export class URLSearchParams {
     }
     const queryString = queryStringify(entries);
     this.#entries = entries;
-    this.#queryString = queryString === "" ? "" : "?" + queryString;
+    this.#queryString = "?" + queryString;
+    if (this.#queryString === "?") {
+      this.#queryString = "";
+    }
   }
 
   /**
    * @returns {Generator<[string, string], void, unknown>}
    */
   *entries() {
+    // Use a for-let loop instead of for-of loop to avoid looping over a
+    // captured copy of the array; accessing array elements by index give us a
+    // live view.
     for (let i = 0; i < this.#entries.length; i++) {
       const entry = this.#entries[i];
       if (entry === undefined) {
@@ -202,6 +192,9 @@ export class URLSearchParams {
     if (typeof callback !== "function") {
       throw new TypeError("URLSearchParams.forEach: callback is not a function");
     }
+    // Use a for-let loop instead of for-of loop to avoid looping over a
+    // captured copy of the array; accessing array elements by index give us a
+    // live view.
     for (let i = 0; i < this.#entries.length; i++) {
       const entry = this.#entries[i];
       if (entry === undefined) {
@@ -262,7 +255,7 @@ export class URLSearchParams {
         continue;
       }
       if (value !== undefined) {
-        if (entry[1] === valueStr) {
+        if (entry[1] !== valueStr) {
           continue;
         }
       }
@@ -275,6 +268,9 @@ export class URLSearchParams {
    * @returns {Generator<string, void, unknown>}
    */
   *keys() {
+    // Use a for-let loop instead of for-of loop to avoid looping over a
+    // captured copy of the array; accessing array elements by index give us a
+    // live view.
     for (let i = 0; i < this.#entries.length; i++) {
       const entry = this.#entries[i];
       if (entry === undefined) {
@@ -298,36 +294,30 @@ export class URLSearchParams {
     /**
      * @type {Array<[string, string]>}
      */
-    const pairs = [];
+    const entries = [];
     let found = false;
-    for (const pair of this.#entries) {
-      if (pair[0] !== nameStr) {
-        pairs.push(pair);
-      } else if (!found) {
-        pairs.push([nameStr, valueStr]);
-        found = true;
+    for (const entry of this.#entries) {
+      if (entry[0] !== nameStr) {
+        entries.push(entry);
+        continue;
       }
+      if (found) {
+        continue;
+      }
+      entries.push([nameStr, valueStr]);
+      found = true;
     }
     if (!found) {
-      pairs.push([nameStr, valueStr]);
+      entries.push([nameStr, valueStr]);
     }
-    this.#commit(pairs);
-  }
-
-  /**
-   * @param {Array<[string, string]>} pairs
-   * @returns {void}
-   */
-  #commit(pairs) {
-    const encoded = queryStringify(pairs);
-    const rawQuery = encoded === "" ? "" : `?${encoded}`;
-    this.#entries = pairs;
-    this.#queryString = rawQuery;
+    const queryString = queryStringify(entries);
+    this.#entries = entries;
+    this.#queryString = "?" + queryString;
   }
 
   sort() {
-    const pairs = this.#entries.slice();
-    pairs.sort((left, right) => {
+    const entries = Array.from(this.#entries);
+    entries.sort((left, right) => {
       if (left[0] < right[0]) {
         return -1;
       }
@@ -336,8 +326,14 @@ export class URLSearchParams {
       }
       return 0;
     });
-    this.#commit(pairs);
+    const queryString = queryStringify(entries);
+    this.#entries = entries;
+    this.#queryString = "?" + queryString;
+    if (this.#queryString === "?") {
+      this.#queryString = "";
+    }
   }
+
   toString() {
     return queryStringify(this.#entries);
   }
@@ -346,6 +342,9 @@ export class URLSearchParams {
    * @returns {Generator<string, void, unknown>}
    */
   *values() {
+    // Use a for-let loop instead of for-of loop to avoid looping over a
+    // captured copy of the array; accessing array elements by index give us a
+    // live view.
     for (let i = 0; i < this.#entries.length; i++) {
       const entry = this.#entries[i];
       if (entry === undefined) {
@@ -355,66 +354,91 @@ export class URLSearchParams {
     }
   }
 }
+
+// Web IDL requires Symbol.iterator and entries to be the same function.
+// Replace the class wrapper, which exists so TypeScript recognizes iterability.
+// https://webidl.spec.whatwg.org/#es-iterable
 Object.defineProperty(URLSearchParams.prototype, Symbol.iterator, {
   value: URLSearchParams.prototype.entries,
   writable: true,
   configurable: true,
 });
-export class URL {
-  // URL serialization without query contents; URLSearchParams owns the query.
-  #hrefWithoutQuery = "";
 
-  /**
-   * @returns {URLParts}
-   */
-  get #parts() {
-    const urlParts = urlWithComponent(this.#hrefWithoutQuery, "search", getQueryString(this.#urlSearchParams));
-    if (urlParts === null) {
-      throw new TypeError("Invalid URL");
-    }
-    return urlParts;
-  }
+export class URL {
+  #href = "";
+
   /**
    * @type {URLSearchParams}
    */
   #urlSearchParams;
+
   /**
    * @param {unknown} input
    * @param {unknown} [base]
    */
   constructor(input, base) {
     if (arguments.length < 1) {
-      throw new TypeError("URL requires an input");
+      throw new TypeError(`URL.constructor: requires at least 1 argument (${arguments.length} provided)`);
     }
-    const inputText = stringify(input);
-    const baseText = base === undefined ? undefined : stringify(base);
-    const parts = urlParse(inputText, baseText);
+    const inputStr = stringify(input);
+    const baseStr = base === undefined ? undefined : stringify(base);
+    const parts = urlParse(inputStr, baseStr);
     if (parts === null) {
-      throw new TypeError("Invalid URL");
+      throw new TypeError("URL.constructor: invalid URL");
     }
-    this.#urlSearchParams = new URLSearchParams(parts.search);
-    this.#hrefWithoutQuery = setRawQuery(this.#urlSearchParams, parts, false);
-  }
-  /**
-   * @param {string} component
-   * @param {unknown} value
-   * @returns {void}
-   */
-  #set(component, value) {
-    const valueText = stringify(value); // Coercion can mutate the URL; read href afterward.
-    const updated = urlWithComponent(this.#parts.href, component, valueText);
-    if (updated === null) {
-      if (component === "href") {
-        throw new TypeError("Invalid URL");
-      }
-      return;
+    const hashIndex = parts.href.indexOf("#");
+    let queryEnd = parts.href.length;
+    if (hashIndex !== -1) {
+      queryEnd = hashIndex;
     }
-    this.#hrefWithoutQuery = setRawQuery(
-      this.#urlSearchParams,
-      updated,
-      component === "href" || component === "search",
-    );
+    const queryIndex = parts.href.indexOf("?");
+    let queryString = "";
+    let href = parts.href;
+    if (queryIndex !== -1 && queryIndex < queryEnd) {
+      queryString = parts.href.slice(queryIndex, queryEnd);
+      href = parts.href.slice(0, queryIndex + 1) + parts.href.slice(queryEnd);
+    }
+    this.#urlSearchParams = new URLSearchParams();
+    setQueryString(this.#urlSearchParams, queryString);
+    this.#href = href;
   }
+
+  get [Symbol.toStringTag]() { return "URL"; }
+
+  get hash() { return this.#getURLParts().hash; }
+  set hash(value) { this.#setComponent("hash", value); }
+
+  get host() { return this.#getURLParts().host; }
+  set host(value) { this.#setComponent("host", value); }
+
+  get hostname() { return this.#getURLParts().hostname; }
+  set hostname(value) { this.#setComponent("hostname", value); }
+
+  get href() { return this.#getURLParts().href; }
+  set href(value) { this.#setComponent("href", value); }
+
+  get origin() { return this.#getURLParts().origin; }
+
+  get password() { return this.#getURLParts().password; }
+  set password(value) { this.#setComponent("password", value); }
+
+  get pathname() { return this.#getURLParts().pathname; }
+  set pathname(value) { this.#setComponent("pathname", value); }
+
+  get port() { return this.#getURLParts().port; }
+  set port(value) { this.#setComponent("port", value); }
+
+  get protocol() { return this.#getURLParts().protocol; }
+  set protocol(value) { this.#setComponent("protocol", value); }
+
+  get search() { return this.#getURLParts().search; }
+  set search(value) { this.#setComponent("search", value); }
+
+  get searchParams() { return this.#urlSearchParams; }
+
+  get username() { return this.#getURLParts().username; }
+  set username(value) { this.#setComponent("username", value); }
+
   /**
    * @param {unknown} input
    * @param {unknown} [base]
@@ -422,12 +446,13 @@ export class URL {
    */
   static canParse(input, base) {
     if (arguments.length < 1) {
-      throw new TypeError("URL.canParse requires an input");
+      throw new TypeError(`URL.canParse: requires at least 1 argument (${arguments.length} provided)`);
     }
-    const inputText = stringify(input);
-    const baseText = base === undefined ? undefined : stringify(base);
-    return urlParse(inputText, baseText) !== null;
+    const inputStr = stringify(input);
+    const baseStr = base === undefined ? undefined : stringify(base);
+    return urlParse(inputStr, baseStr) !== null;
   }
+
   /**
    * @param {unknown} input
    * @param {unknown} [base]
@@ -435,90 +460,67 @@ export class URL {
    */
   static parse(input, base) {
     if (arguments.length < 1) {
-      throw new TypeError("URL.parse requires an input");
+      throw new TypeError(`URL.parse: requires at least 1 argument (${arguments.length} provided)`);
     }
-    const inputText = stringify(input);
-    const baseText = base === undefined ? undefined : stringify(base);
-    const parts = urlParse(inputText, baseText);
-    if (parts === null) {
+    const inputStr = stringify(input);
+    const baseStr = base === undefined ? undefined : stringify(base);
+    const urlParts = urlParse(inputStr, baseStr);
+    if (urlParts === null) {
       return null;
     }
-    return new URL(parts.href);
+    return new URL(urlParts.href);
   }
-  get href() {
-    return this.#parts.href;
-  }
-  set href(value) {
-    this.#set("href", value);
-  }
-  get origin() {
-    return this.#parts.origin;
-  }
-  get protocol() {
-    return this.#parts.protocol;
-  }
-  set protocol(value) {
-    this.#set("protocol", value);
-  }
-  get username() {
-    return this.#parts.username;
-  }
-  set username(value) {
-    this.#set("username", value);
-  }
-  get password() {
-    return this.#parts.password;
-  }
-  set password(value) {
-    this.#set("password", value);
-  }
-  get host() {
-    return this.#parts.host;
-  }
-  set host(value) {
-    this.#set("host", value);
-  }
-  get hostname() {
-    return this.#parts.hostname;
-  }
-  set hostname(value) {
-    this.#set("hostname", value);
-  }
-  get port() {
-    return this.#parts.port;
-  }
-  set port(value) {
-    this.#set("port", value);
-  }
-  get pathname() {
-    return this.#parts.pathname;
-  }
-  set pathname(value) {
-    this.#set("pathname", value);
-  }
-  get search() {
-    return this.#parts.search;
-  }
-  set search(value) {
-    this.#set("search", value);
-  }
-  get hash() {
-    return this.#parts.hash;
-  }
-  set hash(value) {
-    this.#set("hash", value);
-  }
-  get searchParams() {
-    return this.#urlSearchParams;
-  }
+
   toString() {
-    return this.#parts.href;
+    return this.#getURLParts().href;
   }
+
   toJSON() {
-    return this.#parts.href;
+    return this.#getURLParts().href;
   }
-  get [Symbol.toStringTag]() {
-    return "URL";
+
+  /**
+   * @returns {URLParts}
+   */
+  #getURLParts() {
+    const urlParts = urlWithComponent(this.#href, "search", getQueryString(this.#urlSearchParams));
+    if (urlParts === null) {
+      throw new TypeError("URL.#getURLParts: invalid URL");
+    }
+    return urlParts;
+  }
+
+  /**
+   * @param {string} component
+   * @param {unknown} value
+   * @returns {void}
+   */
+  #setComponent(component, value) {
+    const valueStr = stringify(value);
+    const urlParts = urlWithComponent(this.#getURLParts().href, component, valueStr);
+    if (urlParts === null) {
+      if (component === "href") {
+        throw new TypeError("URL.href: invalid URL");
+      }
+      return;
+    }
+    // Extract from href to distinguish a bare '?' from no query.
+    const hashIndex = urlParts.href.indexOf("#");
+    let queryEnd = urlParts.href.length;
+    if (hashIndex !== -1) {
+      queryEnd = hashIndex;
+    }
+    const queryIndex = urlParts.href.indexOf("?");
+    let queryString = "";
+    let href = urlParts.href;
+    if (queryIndex !== -1 && queryIndex < queryEnd) {
+      queryString = urlParts.href.slice(queryIndex, queryEnd);
+      href = urlParts.href.slice(0, queryIndex + 1) + urlParts.href.slice(queryEnd);
+    }
+    if (component === "href" || component === "search") {
+      setQueryString(this.#urlSearchParams, queryString);
+    }
+    this.#href = href;
   }
 }
 
