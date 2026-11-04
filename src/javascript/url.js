@@ -119,6 +119,10 @@ export class URLSearchParams {
     }
   }
 
+  get [Symbol.toStringTag]() {
+    return "URLSearchParams";
+  }
+
   get size() {
     return this.#entries.length;
   }
@@ -287,25 +291,25 @@ export class URLSearchParams {
    */
   set(name, value) {
     if (arguments.length < 2) {
-      throw new TypeError("set requires two arguments");
+      throw new TypeError(`URLSearchParams.set: requires at least 2 arguments (${arguments.length} provided)`);
     }
-    const nameText = stringify(name);
-    const valueText = stringify(value);
+    const nameStr = stringify(name);
+    const valueStr = stringify(value);
     /**
      * @type {Array<[string, string]>}
      */
     const pairs = [];
     let found = false;
     for (const pair of this.#entries) {
-      if (pair[0] !== nameText) {
+      if (pair[0] !== nameStr) {
         pairs.push(pair);
       } else if (!found) {
-        pairs.push([nameText, valueText]);
+        pairs.push([nameStr, valueStr]);
         found = true;
       }
     }
     if (!found) {
-      pairs.push([nameText, valueText]);
+      pairs.push([nameStr, valueStr]);
     }
     this.#commit(pairs);
   }
@@ -320,6 +324,7 @@ export class URLSearchParams {
     this.#entries = pairs;
     this.#queryString = rawQuery;
   }
+
   sort() {
     const pairs = this.#entries.slice();
     pairs.sort((left, right) => {
@@ -336,6 +341,7 @@ export class URLSearchParams {
   toString() {
     return queryStringify(this.#entries);
   }
+
   /**
    * @returns {Generator<string, void, unknown>}
    */
@@ -347,9 +353,6 @@ export class URLSearchParams {
       }
       yield entry[1];
     }
-  }
-  get [Symbol.toStringTag]() {
-    return "URLSearchParams";
   }
 }
 Object.defineProperty(URLSearchParams.prototype, Symbol.iterator, {
