@@ -2,157 +2,137 @@
 // Public URL API over the native URL and query-string functions.
 // Only Ada parsing/encoding crosses into C++; JS owns all object behavior.
 
-import { urlParse, urlWithComponent, queryStringParse, queryStringify } from "amj:url_impl";
+import { queryStringParse, queryStringify, urlParse, urlWithComponent } from "amj:url_impl";
 
 /**
  * @typedef {import("amj:url_impl").URLParts} URLParts
  */
+
 /**
- * @typedef {import("amj:url_impl").URLComponent} URLComponent
+ * @type {(urlSearchParams: URLSearchParams) => string}
  */
+let getQueryString;
+
 /**
- * @typedef {{pairs: [string, string][], changed: ((encoded: string) => void) | null}} ParamsState
+ * @type {(urlSearchParams: URLSearchParams, urlParts: URLParts, replaceEntries: boolean) => string}
  */
-/**
- * @type {WeakMap<URLSearchParams, ParamsState>}
- */
-const paramsStates = new WeakMap();
-const pairLimit = 65536;
-const inputLimit = 1048576;
-/**
- * @param {unknown} value
- * @returns {string}
- */
-const scalarString = (value) => {
-  if (typeof value === "symbol") {
-    throw new TypeError("Cannot convert a Symbol to a URL string");
-  }
-  // Unicode matching sees paired surrogates as one non-surrogate code point.
-  return String(value).replace(/[\uD800-\uDFFF]/gu, "\uFFFD");
-};
-/**
- * @param {string} text
- * @returns {number}
- */
-const byteLength = (text) => {
-  let bytes = 0;
-  for (const character of text) {
-    const point = character.codePointAt(0);
-    if (point === undefined) {
-      throw new TypeError("Unexpected empty string character");
-    }
-    if (point < 0x80) {
-      bytes++;
-    } else if (point < 0x800) {
-      bytes += 2;
-    } else if (point < 0x10000) {
-      bytes += 3;
-    } else {
-      bytes += 4;
-    }
-  }
-  return bytes;
-};
+let setRawQuery;
+
 export class URLSearchParams {
   /**
-   * @type {ParamsState}
+   * @type {Array<[string, string]>}
    */
-  #state = { pairs: [], changed: null };
-  /**
-   * @param {unknown} [input]
-   */
-  constructor(input) {
-    /**
-     * @type {[string, string][]}
-     */
-    let pairs = [];
-    let bytes = 0;
-    if (input !== undefined && input !== null) {
-      if (typeof input === "object" || typeof input === "function") {
-        // Dynamic JS records/iterators are checked here; yielded values
-        // remain unknown until scalarString converts them.
-        const properties =
-          /**
-           * @type {Record<PropertyKey, unknown>}
-           */ (input);
-        const iterator = properties[Symbol.iterator];
-        if (iterator !== undefined && iterator !== null) {
-          if (typeof iterator !== "function") {
-            throw new TypeError("Expected an iterable");
-          }
-          const iterable = {
-            [Symbol.iterator]: () =>
-              /**
-               * @type {() => Iterator<unknown>}
-               */ (iterator).call(input),
-          };
-          for (const pair of iterable) {
-            if (pairs.length >= pairLimit) {
-              throw new RangeError("URL query exceeds 65536 pairs");
-            }
-            if (pair === null || (typeof pair !== "object" && typeof pair !== "function")) {
-              throw new TypeError("Expected iterable name/value pairs");
-            }
-            /**
-             * @type {string[]}
-             */
-            const fields = [];
-            // for...of performs runtime iterator-protocol validation.
-            for (const field of /**
-             * @type {Iterable<unknown>}
-             */ (pair)) {
-              if (fields.length === 2) {
-                throw new TypeError("Expected exactly two fields per pair");
-              }
-              fields.push(scalarString(field));
-            }
-            const [name, value] = fields;
-            if (fields.length !== 2 || name === undefined || value === undefined) {
-              throw new TypeError("Expected exactly two fields per pair");
-            }
-            bytes += byteLength(name) + byteLength(value);
-            if (bytes > inputLimit) {
-              throw new RangeError("URL query exceeds 1 MiB");
-            }
-            pairs.push([name, value]);
-          }
-        } else {
-          for (const name of Object.keys(input)) {
-            if (pairs.length >= pairLimit) {
-              throw new RangeError("URL query exceeds 65536 pairs");
-            }
-            /**
-             * @type {[string, string]}
-             */
-            const fields = [scalarString(name), scalarString(properties[name])];
-            bytes += byteLength(fields[0]) + byteLength(fields[1]);
-            if (bytes > inputLimit) {
-              throw new RangeError("URL query exceeds 1 MiB");
-            }
-            pairs.push(fields);
-          }
-        }
-      } else {
-        pairs = queryStringParse(scalarString(input));
+  #entries = [];
+
+  #queryString = "";
+
+  static {
+    getQueryString = function (urlSearchParams) {
+      return urlSearchParams.#queryString;
+    };
+    setRawQuery = (urlSearchParams, urlParts, replaceEntries) => {
+      // Unlike parts.search, the href distinguishes an empty '?' from no query.
+      const hashIndex = urlParts.href.indexOf("#");
+      const queryEnd = hashIndex === -1 ? urlParts.href.length : hashIndex;
+      const queryIndex = urlParts.href.indexOf("?");
+      const hasQuery = queryIndex !== -1 && queryIndex < queryEnd;
+      const rawQuery = hasQuery ? urlParts.href.slice(queryIndex, queryEnd) : "";
+      let entries = urlSearchParams.#entries;
+      if (replaceEntries) {
+        entries = queryStringParse(rawQuery);
+        queryStringify(entries);
       }
-    }
-    queryStringify(pairs);
-    this.#state.pairs = pairs;
-    paramsStates.set(this, this.#state);
+      urlSearchParams.#entries = entries;
+      urlSearchParams.#queryString = rawQuery;
+      // Replace query contents with a bare delimiter; URL installs the current query.
+      return hasQuery ? urlParts.href.slice(0, queryIndex + 1) + urlParts.href.slice(queryEnd) : urlParts.href;
+    };
   }
   /**
-   * @param {[string, string][]} pairs
+   * @param {unknown} [options]
+   */
+  constructor(options) {
+    if (options == null) {
+      return;
+    }
+    /**
+     * @type {Array<[string, string]>}
+     */
+    let entries = [];
+    if (typeof options === "object" || typeof options === "function") {
+      // Dynamic JS records/iterators are checked here; yielded values
+      // remain unknown until scalarString converts them.
+      const properties =
+        /**
+         * @type {Record<PropertyKey, unknown>}
+         */ (options);
+      const iterator = properties[Symbol.iterator];
+      if (iterator !== undefined && iterator !== null) {
+        if (typeof iterator !== "function") {
+          throw new TypeError("Expected an iterable");
+        }
+        const iterable = {
+          [Symbol.iterator]: () =>
+            /**
+             * @type {() => Iterator<unknown>}
+             */ (iterator).call(options),
+        };
+        for (const pair of iterable) {
+          if (entries.length >= 65536) {
+            throw new RangeError("URL query exceeds 65536 pairs");
+          }
+          if (pair === null || (typeof pair !== "object" && typeof pair !== "function")) {
+            throw new TypeError("Expected iterable name/value pairs");
+          }
+          /**
+           * @type {Array<string>}
+           */
+          const fields = [];
+          // for...of performs runtime iterator-protocol validation.
+          for (const field of /**
+           * @type {Iterable<unknown>}
+           */ (pair)) {
+            if (fields.length === 2) {
+              throw new TypeError("Expected exactly two fields per pair");
+            }
+            fields.push(stringify(field));
+          }
+          const [name, value] = fields;
+          if (fields.length !== 2 || name === undefined || value === undefined) {
+            throw new TypeError("Expected exactly two fields per pair");
+          }
+          entries.push([name, value]);
+        }
+      } else {
+        for (const name of Object.keys(options)) {
+          if (entries.length >= 65536) {
+            throw new RangeError("URL query exceeds 65536 pairs");
+          }
+          /**
+           * @type {[string, string]}
+           */
+          const fields = [stringify(name), stringify(properties[name])];
+          entries.push(fields);
+        }
+      }
+    } else {
+      entries = queryStringParse(stringify(options));
+    }
+    queryStringify(entries);
+    this.#entries = entries;
+  }
+  /**
+   * @param {Array<[string, string]>} pairs
    * @returns {void}
    */
   #commit(pairs) {
     const encoded = queryStringify(pairs);
-    if (this.#state.changed !== null) {
-      this.#state.changed(encoded);
-    }
-    this.#state.pairs = pairs;
+    const rawQuery = encoded === "" ? "" : `?${encoded}`;
+    this.#entries = pairs;
+    this.#queryString = rawQuery;
   }
   get size() {
-    return this.#state.pairs.length;
+    return this.#entries.length;
   }
   /**
    * @param {unknown} name
@@ -163,9 +143,9 @@ export class URLSearchParams {
     if (arguments.length < 2) {
       throw new TypeError("append requires two arguments");
     }
-    const nameText = scalarString(name);
-    const valueText = scalarString(value);
-    this.#commit([...this.#state.pairs, [nameText, valueText]]);
+    const nameText = stringify(name);
+    const valueText = stringify(value);
+    this.#commit([...this.#entries, [nameText, valueText]]);
   }
   /**
    * @param {unknown} name
@@ -176,12 +156,12 @@ export class URLSearchParams {
     if (arguments.length < 1) {
       throw new TypeError("delete requires a name");
     }
-    name = scalarString(name);
+    name = stringify(name);
     const matchValue = value !== undefined;
     if (matchValue) {
-      value = scalarString(value);
+      value = stringify(value);
     }
-    this.#commit(this.#state.pairs.filter((pair) => pair[0] !== name || (matchValue && pair[1] !== value)));
+    this.#commit(this.#entries.filter((pair) => pair[0] !== name || (matchValue && pair[1] !== value)));
   }
   /**
    * @param {unknown} name
@@ -191,8 +171,8 @@ export class URLSearchParams {
     if (arguments.length < 1) {
       throw new TypeError("get requires a name");
     }
-    name = scalarString(name);
-    for (const pair of this.#state.pairs) {
+    name = stringify(name);
+    for (const pair of this.#entries) {
       if (pair[0] === name) {
         return pair[1];
       }
@@ -201,15 +181,15 @@ export class URLSearchParams {
   }
   /**
    * @param {unknown} name
-   * @returns {string[]}
+   * @returns {Array<string>}
    */
   getAll(name) {
     if (arguments.length < 1) {
       throw new TypeError("getAll requires a name");
     }
-    name = scalarString(name);
+    name = stringify(name);
     const values = [];
-    for (const pair of this.#state.pairs) {
+    for (const pair of this.#entries) {
       if (pair[0] === name) {
         values.push(pair[1]);
       }
@@ -225,12 +205,12 @@ export class URLSearchParams {
     if (arguments.length < 1) {
       throw new TypeError("has requires a name");
     }
-    name = scalarString(name);
+    name = stringify(name);
     const matchValue = value !== undefined;
     if (matchValue) {
-      value = scalarString(value);
+      value = stringify(value);
     }
-    return this.#state.pairs.some((pair) => pair[0] === name && (!matchValue || pair[1] === value));
+    return this.#entries.some((pair) => pair[0] === name && (!matchValue || pair[1] === value));
   }
   /**
    * @param {unknown} name
@@ -241,14 +221,14 @@ export class URLSearchParams {
     if (arguments.length < 2) {
       throw new TypeError("set requires two arguments");
     }
-    const nameText = scalarString(name);
-    const valueText = scalarString(value);
+    const nameText = stringify(name);
+    const valueText = stringify(value);
     /**
-     * @type {[string, string][]}
+     * @type {Array<[string, string]>}
      */
     const pairs = [];
     let found = false;
-    for (const pair of this.#state.pairs) {
+    for (const pair of this.#entries) {
       if (pair[0] !== nameText) {
         pairs.push(pair);
       } else if (!found) {
@@ -262,7 +242,7 @@ export class URLSearchParams {
     this.#commit(pairs);
   }
   sort() {
-    const pairs = this.#state.pairs.slice();
+    const pairs = this.#entries.slice();
     pairs.sort((left, right) => {
       if (left[0] < right[0]) {
         return -1;
@@ -275,7 +255,7 @@ export class URLSearchParams {
     this.#commit(pairs);
   }
   toString() {
-    return queryStringify(this.#state.pairs);
+    return queryStringify(this.#entries);
   }
   /**
    * @param {(this: unknown, value: string, name: string, params: URLSearchParams) => void} callback
@@ -287,8 +267,8 @@ export class URLSearchParams {
       throw new TypeError("Expected a callback");
     }
     let index = 0;
-    while (index < this.#state.pairs.length) {
-      const pair = this.#state.pairs[index++];
+    while (index < this.#entries.length) {
+      const pair = this.#entries[index++];
       if (pair === undefined) {
         throw new RangeError("Invalid query pair index");
       }
@@ -300,8 +280,8 @@ export class URLSearchParams {
    */
   *entries() {
     let index = 0;
-    while (index < this.#state.pairs.length) {
-      const pair = this.#state.pairs[index++];
+    while (index < this.#entries.length) {
+      const pair = this.#entries[index++];
       if (pair === undefined) {
         throw new RangeError("Invalid query pair index");
       }
@@ -337,14 +317,23 @@ Object.defineProperty(URLSearchParams.prototype, Symbol.iterator, {
   configurable: true,
 });
 export class URL {
+  // URL serialization without query contents; URLSearchParams owns the query.
+  #hrefWithoutQuery = "";
+
   /**
-   * @type {URLParts}
+   * @returns {URLParts}
    */
-  #parts;
+  get #parts() {
+    const urlParts = urlWithComponent(this.#hrefWithoutQuery, "search", getQueryString(this.#urlSearchParams));
+    if (urlParts === null) {
+      throw new TypeError("Invalid URL");
+    }
+    return urlParts;
+  }
   /**
    * @type {URLSearchParams}
    */
-  #searchParams;
+  #urlSearchParams;
   /**
    * @param {unknown} input
    * @param {unknown} [base]
@@ -353,33 +342,22 @@ export class URL {
     if (arguments.length < 1) {
       throw new TypeError("URL requires an input");
     }
-    const inputText = scalarString(input);
-    const baseText = base === undefined ? undefined : scalarString(base);
+    const inputText = stringify(input);
+    const baseText = base === undefined ? undefined : stringify(base);
     const parts = urlParse(inputText, baseText);
     if (parts === null) {
       throw new TypeError("Invalid URL");
     }
-    this.#parts = parts;
-    this.#searchParams = new URLSearchParams(parts.search);
-    const paramsState = paramsStates.get(this.#searchParams);
-    if (paramsState === undefined) {
-      throw new TypeError("Missing URL query state");
-    }
-    paramsState.changed = (encoded) => {
-      const updated = urlWithComponent(this.#parts.href, "search", encoded);
-      if (updated === null) {
-        throw new TypeError("Invalid URL query");
-      }
-      this.#parts = updated;
-    };
+    this.#urlSearchParams = new URLSearchParams(parts.search);
+    this.#hrefWithoutQuery = setRawQuery(this.#urlSearchParams, parts, false);
   }
   /**
-   * @param {URLComponent} component
+   * @param {string} component
    * @param {unknown} value
    * @returns {void}
    */
   #set(component, value) {
-    const valueText = scalarString(value); // Coercion can mutate the URL; read href afterward.
+    const valueText = stringify(value); // Coercion can mutate the URL; read href afterward.
     const updated = urlWithComponent(this.#parts.href, component, valueText);
     if (updated === null) {
       if (component === "href") {
@@ -387,16 +365,11 @@ export class URL {
       }
       return;
     }
-    if (component === "href" || component === "search") {
-      const pairs = queryStringParse(updated.search);
-      queryStringify(pairs);
-      const paramsState = paramsStates.get(this.#searchParams);
-      if (paramsState === undefined) {
-        throw new TypeError("Missing URL query state");
-      }
-      paramsState.pairs = pairs;
-    }
-    this.#parts = updated;
+    this.#hrefWithoutQuery = setRawQuery(
+      this.#urlSearchParams,
+      updated,
+      component === "href" || component === "search",
+    );
   }
   /**
    * @param {unknown} input
@@ -407,8 +380,8 @@ export class URL {
     if (arguments.length < 1) {
       throw new TypeError("URL.canParse requires an input");
     }
-    const inputText = scalarString(input);
-    const baseText = base === undefined ? undefined : scalarString(base);
+    const inputText = stringify(input);
+    const baseText = base === undefined ? undefined : stringify(base);
     return urlParse(inputText, baseText) !== null;
   }
   /**
@@ -420,8 +393,8 @@ export class URL {
     if (arguments.length < 1) {
       throw new TypeError("URL.parse requires an input");
     }
-    const inputText = scalarString(input);
-    const baseText = base === undefined ? undefined : scalarString(base);
+    const inputText = stringify(input);
+    const baseText = base === undefined ? undefined : stringify(base);
     const parts = urlParse(inputText, baseText);
     if (parts === null) {
       return null;
@@ -492,7 +465,7 @@ export class URL {
     this.#set("hash", value);
   }
   get searchParams() {
-    return this.#searchParams;
+    return this.#urlSearchParams;
   }
   toString() {
     return this.#parts.href;
@@ -503,4 +476,16 @@ export class URL {
   get [Symbol.toStringTag]() {
     return "URL";
   }
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
+function stringify(value) {
+  if (typeof value === "symbol") {
+    throw new TypeError("Cannot convert a Symbol value to a string");
+  }
+  // Unicode matching sees paired surrogates as one non-surrogate code point.
+  return String(value).replace(/[\uD800-\uDFFF]/gu, "\uFFFD");
 }

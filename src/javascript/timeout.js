@@ -3,7 +3,7 @@
 import { timeoutImpl } from "amj:timeout_impl";
 
 /**
- * @template {unknown[]} Arguments
+ * @template {Array<unknown>} Arguments
  * @param {(...args: Arguments) => void} callback
  * @param {number} [delay]
  * @param {Arguments} args

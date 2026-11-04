@@ -285,9 +285,9 @@ JSValue queryStringify(JSContext* jsContext, JSValueConst /* thisValue */, int a
         if (count > 65535) {
             return JS_ThrowRangeError(jsContext, "queryStringify: arg0: queryString exceeds 65535 entries");
         }
+        const size_t countSize = static_cast<size_t>(count);
 
         ada::url_search_params urlSearchParams;
-        const size_t countSize = static_cast<size_t>(count);
         std::size_t numBytes = 0;
         for (size_t index = 0; index < countSize; index++) {
             // Get entry array.

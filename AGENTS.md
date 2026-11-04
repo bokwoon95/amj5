@@ -61,6 +61,10 @@
 - Preserve bulk/range operations such as .insert(end(), first, last); do not replace them with single-element loops.
 - Preserve existing semantics: guard writes with .contains() when existing entries must not be overwritten.
 
+## JavaScript
+- JSDoc: Use () => Type, not { (): Type }, for plain function types.
+- JSDoc: Use Array<Type> and ReadonlyArray<Type>, never Type[] or readonly Type[].
+
 ## Python
 - Use typed Python as much as possible.
 - Write Python like Go: prefer straightforward conditionals and loops, useful zero values, and dataclasses for structs.

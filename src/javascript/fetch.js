@@ -630,7 +630,7 @@ class Response {
     const decoder = new TextDecoder();
     const reader = this.#body.getReader();
     /**
-     * @type {string[]}
+     * @type {Array<string>}
      */
     const parts = [];
     let bytes = 0;

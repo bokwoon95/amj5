@@ -127,7 +127,7 @@ export class TextDecoder {
     }
 
     /**
-     * @type {string[]}
+     * @type {Array<string>}
      */
     const characters = [];
 
