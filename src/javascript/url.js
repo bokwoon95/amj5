@@ -271,21 +271,15 @@ export class URLSearchParams {
    * @returns {Generator<string, void, unknown>}
    */
   *keys() {
-    for (const [name] of this.entries()) {
-      yield name;
+    for (let i = 0; i < this.#entries.length; i++) {
+      const entry = this.#entries[i];
+      if (entry === undefined) {
+        throw new RangeError(`URLSearchParams.keys: index ${i} out of bounds (length = ${this.#entries.length})`);
+      }
+      yield entry[0];
     }
   }
 
-  /**
-   * @param {Array<[string, string]>} pairs
-   * @returns {void}
-   */
-  #commit(pairs) {
-    const encoded = queryStringify(pairs);
-    const rawQuery = encoded === "" ? "" : `?${encoded}`;
-    this.#entries = pairs;
-    this.#queryString = rawQuery;
-  }
   /**
    * @param {unknown} name
    * @param {unknown} value
@@ -315,6 +309,17 @@ export class URLSearchParams {
     }
     this.#commit(pairs);
   }
+
+  /**
+   * @param {Array<[string, string]>} pairs
+   * @returns {void}
+   */
+  #commit(pairs) {
+    const encoded = queryStringify(pairs);
+    const rawQuery = encoded === "" ? "" : `?${encoded}`;
+    this.#entries = pairs;
+    this.#queryString = rawQuery;
+  }
   sort() {
     const pairs = this.#entries.slice();
     pairs.sort((left, right) => {
@@ -335,8 +340,12 @@ export class URLSearchParams {
    * @returns {Generator<string, void, unknown>}
    */
   *values() {
-    for (const [, value] of this.entries()) {
-      yield value;
+    for (let i = 0; i < this.#entries.length; i++) {
+      const entry = this.#entries[i];
+      if (entry === undefined) {
+        throw new RangeError(`URLSearchParams.values: index ${i} out of bounds (length = ${this.#entries.length})`);
+      }
+      yield entry[1];
     }
   }
   get [Symbol.toStringTag]() {
