@@ -8,9 +8,6 @@ import { urlParse, urlWithComponent, queryStringParse, queryStringify } from "am
  * @typedef {import("amj:url_impl").URLParts} URLParts
  */
 /**
- * @typedef {import("amj:url_impl").URLComponent} URLComponent
- */
-/**
  * @typedef {{pairs: [string, string][], changed: ((encoded: string) => void) | null}} ParamsState
  */
 /**
@@ -374,7 +371,7 @@ export class URL {
     };
   }
   /**
-   * @param {URLComponent} component
+   * @param {string} component
    * @param {unknown} value
    * @returns {void}
    */
