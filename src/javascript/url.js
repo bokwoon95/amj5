@@ -48,79 +48,234 @@ export class URLSearchParams {
       return hasQuery ? urlParts.href.slice(0, queryIndex + 1) + urlParts.href.slice(queryEnd) : urlParts.href;
     };
   }
+
   /**
    * @param {unknown} [options]
    */
   constructor(options) {
-    if (options == null) {
+    if (options === null || options === undefined) {
       return;
     }
-    /**
-     * @type {Array<[string, string]>}
-     */
-    let entries = [];
-    if (typeof options === "object" || typeof options === "function") {
-      // Dynamic JS records/iterators are checked here; yielded values
-      // remain unknown until scalarString converts them.
-      const properties =
-        /**
-         * @type {Record<PropertyKey, unknown>}
-         */ (options);
-      const iterator = properties[Symbol.iterator];
-      if (iterator !== undefined && iterator !== null) {
-        if (typeof iterator !== "function") {
-          throw new TypeError("Expected an iterable");
+    if (typeof options !== "object" && typeof options !== "function") {
+      this.#entries = queryStringParse(stringify(options));
+      return;
+    }
+    const entriesIteratorFunction = Reflect.get(options, Symbol.iterator);
+    if (entriesIteratorFunction === null || entriesIteratorFunction === undefined) {
+      for (const name of Object.keys(options)) {
+        if (this.#entries.length > 65535) {
+          throw new RangeError("queryString has too many entries");
         }
-        const iterable = {
-          [Symbol.iterator]: () =>
-            /**
-             * @type {() => Iterator<unknown>}
-             */ (iterator).call(options),
-        };
-        for (const pair of iterable) {
-          if (entries.length >= 65536) {
-            throw new RangeError("URL query exceeds 65536 pairs");
-          }
-          if (pair === null || (typeof pair !== "object" && typeof pair !== "function")) {
-            throw new TypeError("Expected iterable name/value pairs");
-          }
-          /**
-           * @type {Array<string>}
-           */
-          const fields = [];
-          // for...of performs runtime iterator-protocol validation.
-          for (const field of /**
-           * @type {Iterable<unknown>}
-           */ (pair)) {
-            if (fields.length === 2) {
-              throw new TypeError("Expected exactly two fields per pair");
-            }
-            fields.push(stringify(field));
-          }
-          const [name, value] = fields;
-          if (fields.length !== 2 || name === undefined || value === undefined) {
-            throw new TypeError("Expected exactly two fields per pair");
-          }
-          entries.push([name, value]);
-        }
-      } else {
-        for (const name of Object.keys(options)) {
-          if (entries.length >= 65536) {
-            throw new RangeError("URL query exceeds 65536 pairs");
-          }
-          /**
-           * @type {[string, string]}
-           */
-          const fields = [stringify(name), stringify(properties[name])];
-          entries.push(fields);
+        this.#entries.push([stringify(name), stringify(Reflect.get(options, name))]);
+      }
+      return;
+    }
+    if (typeof entriesIteratorFunction !== "function") {
+      throw new TypeError("options is not an iterable");
+    }
+    const entriesIterable = {
+      [Symbol.iterator]: function () {
+        return Reflect.apply(entriesIteratorFunction, options, arguments);
+      },
+    };
+    let i = -1;
+    for (const entry of entriesIterable) {
+      i++;
+      if (this.#entries.length > 65535) {
+        throw new RangeError("queryString has too many entries");
+      }
+      if (entry === null) {
+        throw new TypeError(`entry #${i + 1} is null`);
+      }
+      if (typeof entry !== "object" && typeof entry !== "function") {
+        throw new TypeError(`entry #${i + 1} is not an iterable`);
+      }
+      const entryIteratorFunction = Reflect.get(entry, Symbol.iterator);
+      if (typeof entryIteratorFunction != "function") {
+        throw new TypeError(`entry #${i + 1} is not an iterable`);
+      }
+      const entryIterable = {
+        [Symbol.iterator]: function () {
+          return Reflect.apply(entryIteratorFunction, entry, arguments);
+        },
+      };
+      let j = -1;
+      let name = "";
+      let value = "";
+      for (const field of entryIterable) {
+        j++;
+        if (j === 0) {
+          name = stringify(field);
+        } else if (j === 1) {
+          value = stringify(field);
+        } else {
+          throw new TypeError(`entry #${i + 1} has more than two fields`);
         }
       }
-    } else {
-      entries = queryStringParse(stringify(options));
+      if (j < 1) {
+        throw new TypeError(`entry #${i + 1} has less than two fields`);
+      }
+      this.#entries.push([name, value]);
     }
-    queryStringify(entries);
-    this.#entries = entries;
   }
+
+  get size() {
+    return this.#entries.length;
+  }
+
+  [Symbol.iterator]() {
+    return this.entries();
+  }
+
+  /**
+   * @param {unknown} name
+   * @param {unknown} value
+   * @returns {void}
+   */
+  append(name, value) {
+    if (arguments.length < 2) {
+      throw new TypeError(`URLSearchParams.append: requires at least 2 arguments (${arguments.length} provided)`);
+    }
+    const nameStr = stringify(name);
+    const valueStr = stringify(value);
+    const entries = Array.from(this.#entries);
+    entries.push([nameStr, valueStr]);
+    const queryString = queryStringify(entries);
+    this.#entries = entries;
+    this.#queryString = "?" + queryString;
+  }
+
+  /**
+   * @param {unknown} name
+   * @param {unknown} [value]
+   * @returns {void}
+   */
+  delete(name, value) {
+    if (arguments.length < 1) {
+      throw new TypeError(`URLSearchParams.delete: requires at least 1 argument (${arguments.length} provided)`);
+    }
+    const nameStr = stringify(name);
+    const valueStr = stringify(value);
+    const entries = [];
+    for (const entry of this.#entries) {
+      if (entry[0] === nameStr) {
+        if (value === undefined) {
+          continue;
+        }
+        if (entry[1] === valueStr) {
+          continue;
+        }
+      }
+      entries.push(entry);
+    }
+    const queryString = queryStringify(entries);
+    this.#entries = entries;
+    this.#queryString = queryString === "" ? "" : "?" + queryString;
+  }
+
+  /**
+   * @returns {Generator<[string, string], void, unknown>}
+   */
+  *entries() {
+    for (let i = 0; i < this.#entries.length; i++) {
+      const entry = this.#entries[i];
+      if (entry === undefined) {
+        throw new RangeError(`URLSearchParams.entries: index ${i} out of bounds (length = ${this.#entries.length})`);
+      }
+      yield [entry[0], entry[1]];
+    }
+  }
+
+  /**
+   * @param {(value: string, key: string, searchParams: URLSearchParams) => void} callback
+   * @param {unknown} [thisArg]
+   * @returns {void}
+   */
+  forEach(callback, thisArg) {
+    if (arguments.length < 1) {
+      throw new TypeError(`URLSearchParams.forEach: requires at least 1 argument (${arguments.length} provided)`);
+    }
+    if (typeof callback !== "function") {
+      throw new TypeError("URLSearchParams.forEach: callback is not a function");
+    }
+    for (let i = 0; i < this.#entries.length; i++) {
+      const entry = this.#entries[i];
+      if (entry === undefined) {
+        throw new RangeError(`URLSearchParams.entries: index ${i} out of bounds (length = ${this.#entries.length})`);
+      }
+      callback.call(thisArg, entry[1], entry[0], this);
+    }
+  }
+
+  /**
+   * @param {unknown} name
+   * @returns {string | null}
+   */
+  get(name) {
+    if (arguments.length < 1) {
+      throw new TypeError(`URLSearchParams.get: requires at least 1 argument (${arguments.length} provided)`);
+    }
+    const nameStr = stringify(name);
+    for (const entry of this.#entries) {
+      if (entry[0] === nameStr) {
+        return entry[1];
+      }
+    }
+    return null;
+  }
+
+  /**
+   * @param {unknown} name
+   * @returns {Array<string>}
+   */
+  getAll(name) {
+    if (arguments.length < 1) {
+      throw new TypeError(`URLSearchParams.getAll: requires at least 1 argument (${arguments.length} provided)`);
+    }
+    const nameStr = stringify(name);
+    const values = [];
+    for (const entry of this.#entries) {
+      if (entry[0] === nameStr) {
+        values.push(entry[1]);
+      }
+    }
+    return values;
+  }
+
+  /**
+   * @param {unknown} name
+   * @param {unknown} [value]
+   * @returns {boolean}
+   */
+  has(name, value) {
+    if (arguments.length < 1) {
+      throw new TypeError(`URLSearchParams.has: requires at least 1 argument (${arguments.length} provided)`);
+    }
+    const nameStr = stringify(name);
+    const valueStr = stringify(value);
+    for (const entry of this.#entries) {
+      if (entry[0] !== nameStr) {
+        continue;
+      }
+      if (value !== undefined) {
+        if (entry[1] === valueStr) {
+          continue;
+        }
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * @returns {Generator<string, void, unknown>}
+   */
+  *keys() {
+    for (const [name] of this.entries()) {
+      yield name;
+    }
+  }
+
   /**
    * @param {Array<[string, string]>} pairs
    * @returns {void}
@@ -130,87 +285,6 @@ export class URLSearchParams {
     const rawQuery = encoded === "" ? "" : `?${encoded}`;
     this.#entries = pairs;
     this.#queryString = rawQuery;
-  }
-  get size() {
-    return this.#entries.length;
-  }
-  /**
-   * @param {unknown} name
-   * @param {unknown} value
-   * @returns {void}
-   */
-  append(name, value) {
-    if (arguments.length < 2) {
-      throw new TypeError("append requires two arguments");
-    }
-    const nameText = stringify(name);
-    const valueText = stringify(value);
-    this.#commit([...this.#entries, [nameText, valueText]]);
-  }
-  /**
-   * @param {unknown} name
-   * @param {unknown} [value]
-   * @returns {void}
-   */
-  delete(name, value) {
-    if (arguments.length < 1) {
-      throw new TypeError("delete requires a name");
-    }
-    name = stringify(name);
-    const matchValue = value !== undefined;
-    if (matchValue) {
-      value = stringify(value);
-    }
-    this.#commit(this.#entries.filter((pair) => pair[0] !== name || (matchValue && pair[1] !== value)));
-  }
-  /**
-   * @param {unknown} name
-   * @returns {string | null}
-   */
-  get(name) {
-    if (arguments.length < 1) {
-      throw new TypeError("get requires a name");
-    }
-    name = stringify(name);
-    for (const pair of this.#entries) {
-      if (pair[0] === name) {
-        return pair[1];
-      }
-    }
-    return null;
-  }
-  /**
-   * @param {unknown} name
-   * @returns {Array<string>}
-   */
-  getAll(name) {
-    if (arguments.length < 1) {
-      throw new TypeError("getAll requires a name");
-    }
-    name = stringify(name);
-    const values = [];
-    for (const pair of this.#entries) {
-      if (pair[0] === name) {
-        values.push(pair[1]);
-      }
-    }
-    return values;
-  }
-  /**
-   * @param {unknown} name
-   * @param {unknown} [value]
-   * @returns {boolean}
-   */
-  has(name, value) {
-    if (arguments.length < 1) {
-      throw new TypeError("has requires a name");
-    }
-    name = stringify(name);
-    const matchValue = value !== undefined;
-    if (matchValue) {
-      value = stringify(value);
-    }
-    return this.#entries.some((pair) => pair[0] === name && (!matchValue || pair[1] === value));
   }
   /**
    * @param {unknown} name
@@ -258,54 +332,12 @@ export class URLSearchParams {
     return queryStringify(this.#entries);
   }
   /**
-   * @param {(this: unknown, value: string, name: string, params: URLSearchParams) => void} callback
-   * @param {unknown} [thisArg]
-   * @returns {void}
-   */
-  forEach(callback, thisArg) {
-    if (typeof callback !== "function") {
-      throw new TypeError("Expected a callback");
-    }
-    let index = 0;
-    while (index < this.#entries.length) {
-      const pair = this.#entries[index++];
-      if (pair === undefined) {
-        throw new RangeError("Invalid query pair index");
-      }
-      callback.call(thisArg, pair[1], pair[0], this);
-    }
-  }
-  /**
-   * @returns {Generator<[string, string], void, unknown>}
-   */
-  *entries() {
-    let index = 0;
-    while (index < this.#entries.length) {
-      const pair = this.#entries[index++];
-      if (pair === undefined) {
-        throw new RangeError("Invalid query pair index");
-      }
-      yield [pair[0], pair[1]];
-    }
-  }
-  /**
-   * @returns {Generator<string, void, unknown>}
-   */
-  *keys() {
-    for (const [name] of this.entries()) {
-      yield name;
-    }
-  }
-  /**
    * @returns {Generator<string, void, unknown>}
    */
   *values() {
     for (const [, value] of this.entries()) {
       yield value;
     }
-  }
-  [Symbol.iterator]() {
-    return this.entries();
   }
   get [Symbol.toStringTag]() {
     return "URLSearchParams";

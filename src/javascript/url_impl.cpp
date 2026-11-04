@@ -25,7 +25,7 @@ namespace amj::javascript {
 JSValue urlParse(JSContext* jsContext, JSValueConst /* thisValue */, int argc, JSValueConst* argv) {
     try {
         if (argc < 1) {
-            return JS_ThrowTypeError(jsContext, "urlParse: requires 1 argument (%d provided)", argc);
+            return JS_ThrowTypeError(jsContext, "urlParse: requires at least 1 argument (%d provided)", argc);
         }
 
         // Get input string.
@@ -37,7 +37,7 @@ JSValue urlParse(JSContext* jsContext, JSValueConst /* thisValue */, int argc, J
             return JS_EXCEPTION;
         }
         if (input.value().size() > (1U << 20U /* 1 MiB */)) {
-            return JS_ThrowRangeError(jsContext, "urlParse: arg0: input exceeds 1 MiB");
+            return JS_ThrowRangeError(jsContext, "urlParse: arg0: input string too big");
         }
 
         std::optional<ada::url_aggregator> baseURLResult = std::nullopt;
@@ -51,7 +51,7 @@ JSValue urlParse(JSContext* jsContext, JSValueConst /* thisValue */, int argc, J
                 return JS_EXCEPTION;
             }
             if (base.value().size() > (1U << 20U /* 1 MiB */)) {
-                return JS_ThrowRangeError(jsContext, "urlParse: arg1: base exceeds 1 MiB");
+                return JS_ThrowRangeError(jsContext, "urlParse: arg1: base string too big");
             }
             const ada::result<ada::url_aggregator> uri = ada::parse<ada::url_aggregator>(base.value(), nullptr);
             if (!uri.has_value()) {
@@ -71,11 +71,11 @@ JSValue urlParse(JSContext* jsContext, JSValueConst /* thisValue */, int argc, J
             return JS_NULL;
         }
         if (urlResult.value().get_href().size() > (1U << 20U /* 1 MiB */)) {
-            return JS_ThrowRangeError(jsContext, "urlParse: url href exceeds 1 MiB");
+            return JS_ThrowRangeError(jsContext, "urlParse: url href too big");
         }
         const std::string_view search = urlResult.value().get_search();
         if (std::count(search.begin(), search.end(), '&') > 65535) {
-            return JS_ThrowRangeError(jsContext, "urlParse: url queryString exceeds 65535 entries");
+            return JS_ThrowRangeError(jsContext, "urlParse: url queryString has too many entries");
         }
 
         // Return the URLParts.
@@ -118,7 +118,7 @@ JSValue urlWithComponent(JSContext* jsContext, JSValueConst /* thisValue */, int
             return JS_EXCEPTION;
         }
         if (href.value().size() > (1U << 20U /* 1 MiB */)) {
-            return JS_ThrowRangeError(jsContext, "urlWithComponent: arg0: href exceeds 1 MiB");
+            return JS_ThrowRangeError(jsContext, "urlWithComponent: arg0: href string too big");
         }
 
         // Get component string.
@@ -130,7 +130,7 @@ JSValue urlWithComponent(JSContext* jsContext, JSValueConst /* thisValue */, int
             return JS_EXCEPTION;
         }
         if (component.value().size() > (1U << 20U /* 1 MiB */)) {
-            return JS_ThrowRangeError(jsContext, "urlWithComponent: arg1: component exceeds 1 MiB");
+            return JS_ThrowRangeError(jsContext, "urlWithComponent: arg1: component string too big");
         }
 
         // Get value string.
@@ -142,7 +142,7 @@ JSValue urlWithComponent(JSContext* jsContext, JSValueConst /* thisValue */, int
             return JS_EXCEPTION;
         }
         if (value.value().size() > (1U << 20U /* 1 MiB */)) {
-            return JS_ThrowRangeError(jsContext, "urlWithComponent: arg2: value exceeds 1 MiB");
+            return JS_ThrowRangeError(jsContext, "urlWithComponent: arg2: value string too big");
         }
 
         // Set the URL component.
@@ -199,11 +199,11 @@ JSValue urlWithComponent(JSContext* jsContext, JSValueConst /* thisValue */, int
             return JS_ThrowTypeError(jsContext, "urlWithComponent: arg1: unknown URL component");
         }
         if (url.get_href().size() > (1U << 20U /* 1 MiB */)) {
-            return JS_ThrowRangeError(jsContext, "urlWithComponent: url href exceeds 1 MiB");
+            return JS_ThrowRangeError(jsContext, "urlWithComponent: url href too big");
         }
         const std::string_view search = url.get_search();
         if (std::count(search.begin(), search.end(), '&') > 65535) {
-            return JS_ThrowRangeError(jsContext, "urlWithComponent: url queryString exceeds 65535 entries");
+            return JS_ThrowRangeError(jsContext, "urlWithComponent: url queryString has too many entries");
         }
 
         // Return the URLParts.
@@ -245,10 +245,10 @@ JSValue queryStringParse(JSContext* jsContext, JSValueConst /* thisValue */, int
             return JS_EXCEPTION;
         }
         if (queryString.value().size() > (1U << 20U /* 1 MiB */)) {
-            return JS_ThrowRangeError(jsContext, "queryStringParse: arg0: queryString exceeds 1 MiB");
+            return JS_ThrowRangeError(jsContext, "queryStringParse: arg0: queryString too big");
         }
         if (std::count(queryString.value().begin(), queryString.value().end(), '&') > 65535) {
-            return JS_ThrowRangeError(jsContext, "queryStringParse: arg0: queryString exceeds 65535 entries");
+            return JS_ThrowRangeError(jsContext, "queryStringParse: arg0: queryString has too many entries");
         }
 
         // Return the URLSearchParams entries.
@@ -283,7 +283,7 @@ JSValue queryStringify(JSContext* jsContext, JSValueConst /* thisValue */, int a
             return JS_EXCEPTION;
         }
         if (count > 65535) {
-            return JS_ThrowRangeError(jsContext, "queryStringify: arg0: queryString exceeds 65535 entries");
+            return JS_ThrowRangeError(jsContext, "queryStringify: arg0: queryString has too many entries");
         }
         const size_t countSize = static_cast<size_t>(count);
 
@@ -319,7 +319,7 @@ JSValue queryStringify(JSContext* jsContext, JSValueConst /* thisValue */, int a
                 return JS_EXCEPTION;
             }
             if (name.value().size() > (1U << 20U /* 1 MiB */)) {
-                return JS_ThrowRangeError(jsContext, "queryStringify: arg0: entries[%zu][0] exceeds 1 MiB", index);
+                return JS_ThrowRangeError(jsContext, "queryStringify: arg0: entries[%zu][0] string is too big", index);
             }
 
             // Get value string.
@@ -335,11 +335,11 @@ JSValue queryStringify(JSContext* jsContext, JSValueConst /* thisValue */, int a
                 return JS_EXCEPTION;
             }
             if (value.value().size() > (1U << 20U /* 1 MiB */)) {
-                return JS_ThrowRangeError(jsContext, "queryStringify: arg0: entries[%zu][1] exceeds 1 MiB", index);
+                return JS_ThrowRangeError(jsContext, "queryStringify: arg0: entries[%zu][1] string is too big", index);
             }
 
             if (numBytes + name.value().size() + value.value().size() > (1U << 20U /* 1 MiB */)) {
-                return JS_ThrowRangeError(jsContext, "queryStringify: arg0: entries exceeds 1 MiB");
+                return JS_ThrowRangeError(jsContext, "queryStringify: arg0: queryString is too big");
             }
             numBytes = numBytes + name.value().size() + value.value().size();
             urlSearchParams.append(name.value(), value.value());
@@ -348,7 +348,7 @@ JSValue queryStringify(JSContext* jsContext, JSValueConst /* thisValue */, int a
         // Return the queryString.
         const std::string queryString = urlSearchParams.to_string();
         if (queryString.size() > (1U << 20U /* 1 MiB */)) {
-            return JS_ThrowRangeError(jsContext, "queryStringify: result exceeds 1 MiB");
+            return JS_ThrowRangeError(jsContext, "queryStringify: queryString is too big");
         }
         return JSONValue(queryString).toJSValue(jsContext);
     } catch (const std::bad_alloc&) {
