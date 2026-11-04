@@ -11,7 +11,7 @@ The host chooses which target receives those exports.
 | `amj:text`         | `text.js`               | `TextEncoder`, `TextDecoder`                                         |
 | `amj:url_impl`     | `url_impl.hpp/.cpp`     | `urlParse`, `urlWithComponent`, `queryStringParse`, `queryStringify` |
 | `amj:url`          | `url.js`                | `URL`, `URLSearchParams`                                             |
-| `amj:timeout_impl` | `timeout_impl.hpp/.cpp` | `timeoutImpl`                                                        |
+| `amj:timeout_impl` | `timeout_impl.hpp/.cpp` | `timeoutSet`, `timeoutClear`                                         |
 | `amj:timeout`      | `timeout.js`            | `setTimeout`, `clearTimeout`                                         |
 | `amj:fetch_impl`   | `fetch_impl.hpp/.cpp`   | `fetchImpl`                                                          |
 | `amj:fetch`        | `fetch.js`              | `Headers`, `fetch`                                                   |
@@ -29,13 +29,20 @@ object and the URL/text classes. JS owns Promises, abort reasons, public argumen
 normalization, Response objects, and body readers. Response and reader classes
 are internal, not public constructors.
 
-`TimeoutImpl::createModule(jsContext, scheduler)` registers `amj:timeout_impl`,
-exporting `timeoutImpl` with normalized `setTimeout(callback, delay)` and
-`clearTimeout(timerID)` methods. The C++ header and `.d.ts` describe those same
-operations. `timeout.js` implements the public API: callback validation, numeric
-coercion, delay clamping/truncation, and forwarding up to 256 extra arguments via
-a closure. C++ owns callback lifetime, scheduling, cancellation, and cleanup;
-it defensively validates normalized input and enforces the 128-timer limit.
+`createTimeoutImplModule(jsContext, timeoutState)` registers `amj:timeout_impl`,
+exporting normalized `timeoutSet(callback, delay)` and `timeoutClear(timerID)`
+functions. The caller owns one `TimeoutState` per scheduler/context pair, with
+its `scheduler` pointing to the borrowed scheduler. Do not copy, move, or modify
+that state while in use; it must outlive its module's use and pending callbacks.
+The C++ header and `.d.ts` describe those same operations. `timeout.js` implements
+the public API: callback validation, numeric coercion, delay clamping/truncation,
+and forwarding up to 256 extra arguments via a closure. C++ defensively validates
+normalized input and enforces a limit of 65535 pending timers. Cancellation only
+accepts IDs belonging to this state's timers, not unrelated scheduler callbacks.
+Scheduler callbacks own retained JS functions through RAII; execution removes the
+timer ID before invoking JS, and cancellation or scheduler clearing releases both
+the callback and its ID. No active flag or separate cleanup registration is needed.
+After `scheduler.clear()`, the existing state and module remain usable.
 
 Register each C++ module once per context before loading its consumers. Check
 for nullptr and a pending JS exception. Module definitions belong to the context,

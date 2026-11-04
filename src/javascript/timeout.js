@@ -1,6 +1,6 @@
 // @ts-check
 // Public timer semantics over the C++ scheduler-backed implementation.
-import { timeoutImpl } from "amj:timeout_impl";
+import { timeoutSet, timeoutClear } from "amj:timeout_impl";
 
 /**
  * @template {Array<unknown>} Arguments
@@ -23,7 +23,7 @@ export function setTimeout(callback, delay = 0, ...args) {
     milliseconds = 2147483647;
   }
   milliseconds = Math.trunc(milliseconds);
-  return timeoutImpl.setTimeout(() => callback(...args), milliseconds);
+  return timeoutSet(() => callback(...args), milliseconds);
 }
 
 /**
@@ -38,5 +38,5 @@ export function clearTimeout(id) {
   if (!Number.isSafeInteger(timerID) || timerID < 1) {
     return;
   }
-  timeoutImpl.clearTimeout(timerID);
+  timeoutClear(timerID);
 }
