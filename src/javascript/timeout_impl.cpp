@@ -276,12 +276,13 @@ JSModuleDef* createTimeoutImplModule(JSContext* jsContext, Timeout& timeout) {
                 .argc = 1,
             },
         };
+
         JSModuleDef* jsModuleDef = JS_NewCModule(jsContext, "amj:timeout_impl", [](JSContext* jsContext, JSModuleDef* jsModuleDef) -> int {
             const ScopedJSValue modulePrivateValue(jsContext, JS_GetModulePrivateValue(jsContext, jsModuleDef));
             if (JS_IsException(modulePrivateValue.value)) {
                 return -1;
             }
-            const auto functionCallback = [](JSContext* jsContext, JSValueConst thisValue, int argc, JSValueConst* argv, int magic, JSValueConst* functionData) -> JSValue {
+            const auto jsCFunctionData = [](JSContext* jsContext, JSValueConst thisValue, int argc, JSValueConst* argv, int magic, JSValueConst* functionData) -> JSValue {
                 // QuickJS retains the JS carrier, which borrows the native Timeout.
                 Timeout* timeout = static_cast<Timeout*>(JS_GetOpaque2(jsContext, functionData[0], JS_GetClassID(functionData[0])));
                 if (timeout == nullptr) {
@@ -294,12 +295,12 @@ JSModuleDef* createTimeoutImplModule(JSContext* jsContext, Timeout& timeout) {
             };
             std::vector<JSValue> functionData = {modulePrivateValue.value};
             for (std::size_t index = 0; index < functionEntries.size(); index++) {
-                const FunctionEntry& timeoutFunction = functionEntries.at(index);
-                const JSValue function = JS_NewCFunctionData(jsContext, functionCallback, timeoutFunction.argc, static_cast<int>(index), static_cast<int>(functionData.size()), functionData.data());
+                const FunctionEntry& functionEntry = functionEntries.at(index);
+                const JSValue function = JS_NewCFunctionData(jsContext, jsCFunctionData, functionEntry.argc, static_cast<int>(index), static_cast<int>(functionData.size()), functionData.data());
                 if (JS_IsException(function)) {
                     return -1;
                 }
-                const int status = JS_SetModuleExport(jsContext, jsModuleDef, timeoutFunction.name, function);
+                const int status = JS_SetModuleExport(jsContext, jsModuleDef, functionEntry.name, function);
                 if (status < 0) {
                     return -1;
                 }
@@ -309,12 +310,14 @@ JSModuleDef* createTimeoutImplModule(JSContext* jsContext, Timeout& timeout) {
         if (jsModuleDef == nullptr) {
             return nullptr;
         }
+
         for (const FunctionEntry& functionEntry : functionEntries) {
             const int status = JS_AddModuleExport(jsContext, jsModuleDef, functionEntry.name);
             if (status < 0) {
                 return nullptr;
             }
         }
+
         const int status = JS_SetModulePrivateValue(jsContext, jsModuleDef, modulePrivateValue.release());
         if (status < 0) {
             return nullptr;
