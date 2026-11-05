@@ -15,14 +15,14 @@ export function setTimeout(callback, delay = 0, ...args) {
   if (args.length > 256) {
     throw new RangeError("Timer argument limit exceeded");
   }
-  let milliseconds = +delay;
-  if (Number.isNaN(milliseconds) || milliseconds < 0) {
-    milliseconds = 0;
-  } else if (milliseconds > 2147483647) {
-    milliseconds = 2147483647;
+  let delayMs = +delay;
+  if (Number.isNaN(delayMs) || delayMs < 0) {
+    delayMs = 0;
+  } else if (delayMs > 2147483647) {
+    delayMs = 2147483647;
   }
-  milliseconds = Math.trunc(milliseconds);
-  const timerID = timeoutSet(function() { callback(...args) }, milliseconds);
+  delayMs = Math.trunc(delayMs);
+  const timerID = timeoutSet(function() { callback(...args) }, delayMs);
   return timerID;
 }
 

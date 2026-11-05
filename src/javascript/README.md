@@ -29,20 +29,32 @@ object and the URL/text classes. JS owns Promises, abort reasons, public argumen
 normalization, Response objects, and body readers. Response and reader classes
 are internal, not public constructors.
 
-`createTimeoutImplModule(jsContext, timeoutState)` registers `amj:timeout_impl`,
+`createTimeoutImplModule(jsContext, timeout)` registers `amj:timeout_impl`,
 exporting normalized `timeoutSet(callback, delay)` and `timeoutClear(timerID)`
-functions. The caller owns one `TimeoutState` per scheduler/context pair, with
-its `scheduler` pointing to the borrowed scheduler. Do not copy, move, or modify
-that state while in use; it must outlive its module's use and pending callbacks.
+functions. The host creates one `std::shared_ptr<Timeout>` per scheduler/context
+pair; JS bindings retain shared ownership, and `Timeout` retains a
+`std::shared_ptr<Scheduler>`. Do not copy or modify the state while in use.
+Pending callbacks hold `std::weak_ptr<Timeout>` to avoid a native ownership cycle;
+execution is skipped if the timeout has expired. The hidden JS object's finalizer
+releases its owned smart-pointer holder.
 The C++ header and `.d.ts` describe those same operations. `timeout.js` implements
 the public API: callback validation, numeric coercion, delay clamping/truncation,
 and forwarding up to 256 extra arguments via a closure. C++ defensively validates
-normalized input and enforces a limit of 65535 pending timers. Cancellation only
+normalized input and rejects allocation if all positive int32 timer IDs are active.
+Cancellation only
 accepts IDs belonging to this state's timers, not unrelated scheduler callbacks.
+`Timeout` maps its positive int32 timer IDs to native int64 scheduler callback IDs.
+Timer IDs wrap from INT32_MAX to 1, skipping active IDs; scheduler IDs never enter
+JS. Clearing the scheduler preserves the timer-ID allocation counter. IDs may be
+reused after wraparound, so a stale timer ID can then refer to a newer timer.
 Scheduler callbacks own retained JS functions through RAII; execution removes the
 timer ID before invoking JS, and cancellation or scheduler clearing releases both
 the callback and its ID. No active flag or separate cleanup registration is needed.
-After `scheduler.clear()`, the existing state and module remain usable.
+After `scheduler.clear()`, the existing state and module remain usable. All use
+and final smart-pointer release must happen on the owner thread. The host must
+clear scheduled work before context teardown, including potential ownership
+cycles through retained JS callbacks. The context must outlive the scheduler and
+retained JS values; native shared ownership does not extend the context's lifetime.
 
 Register each C++ module once per context before loading its consumers. Check
 for nullptr and a pending JS exception. Module definitions belong to the context,

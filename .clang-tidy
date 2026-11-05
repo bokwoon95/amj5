@@ -3,6 +3,7 @@ Checks: >-
   bugprone-*,
   -bugprone-easily-swappable-parameters,
   clang-analyzer-*,
+  clang-diagnostic-format*,
   clang-diagnostic-missing-designated-field-initializers,
   misc-const-correctness,
   misc-definitions-in-headers,
@@ -39,9 +40,12 @@ Checks: >-
   readability-qualified-auto,
   readability-redundant-smartptr-get,
 ExtraArgsBefore:
+  - '-Wformat'
+  - '-Wformat-security'
   - '-Wmissing-designated-field-initializers'
 WarningsAsErrors: '*'
 HeaderFilterRegex: '.*[/\\]src[/\\].*'
 CheckOptions:
+  performance-unnecessary-value-param.AllowedTypes: 'std::shared_ptr;std::weak_ptr'
   # An earlier implicit reference must not hide a later explicit missing include.
   misc-include-cleaner.DeduplicateFindings: false
