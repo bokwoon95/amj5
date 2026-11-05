@@ -43,8 +43,8 @@ struct TimeoutCallback {
     ~TimeoutCallback() {
         // A timer ID may have been reused while this callback was executing.
         const std::shared_ptr<Timeout> timeout = weakTimeout.lock();
-        if (timeout != nullptr && timeout->timerCallbackIDs.contains(timerID) && timeout->timerCallbackIDs.at(timerID) == callbackID) {
-            timeout->timerCallbackIDs.erase(timerID);
+        if (timeout != nullptr && timeout->registry.contains(timerID) && timeout->registry.at(timerID) == callbackID) {
+            timeout->registry.erase(timerID);
         }
         JS_FreeValue(jsContext, callback);
     }
@@ -54,8 +54,8 @@ struct TimeoutCallback {
         if (timeout == nullptr) {
             return {};
         }
-        if (timeout->timerCallbackIDs.contains(timerID) && timeout->timerCallbackIDs.at(timerID) == callbackID) {
-            timeout->timerCallbackIDs.erase(timerID);
+        if (timeout->registry.contains(timerID) && timeout->registry.at(timerID) == callbackID) {
+            timeout->registry.erase(timerID);
         }
         const ScopedJSValue result(jsContext, JS_Call(jsContext, callback, JS_UNDEFINED, 0, nullptr));
         if (JS_IsException(result.value)) {
@@ -116,7 +116,7 @@ JSValue timeoutSet(JSContext* jsContext, JSValueConst /* thisValue */, int argc,
         while (true) {
             // If the timerCallbackIDs map is full, there are no more available
             // timerIDs.
-            if (timeout->timerCallbackIDs.size() >= static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
+            if (timeout->registry.size() >= static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
                 return JS_ThrowRangeError(jsContext, "timeoutSet: timerIDs exhausted");
             }
             // Increment the timerIDCounter by 1, wrapping when we hit
@@ -127,7 +127,7 @@ JSValue timeoutSet(JSContext* jsContext, JSValueConst /* thisValue */, int argc,
                 timeout->timerIDCounter++;
             }
             // If the timerID is in use, try again.
-            if (timeout->timerCallbackIDs.contains(timeout->timerIDCounter)) {
+            if (timeout->registry.contains(timeout->timerIDCounter)) {
                 continue;
             }
             break;
@@ -147,7 +147,7 @@ JSValue timeoutSet(JSContext* jsContext, JSValueConst /* thisValue */, int argc,
         }
         timeoutCallback->callbackID = callbackID.value();
         try {
-            timeout->timerCallbackIDs.insert_or_assign(timeoutCallback->timerID, timeoutCallback->callbackID);
+            timeout->registry.insert_or_assign(timeoutCallback->timerID, timeoutCallback->callbackID);
         } catch (...) {
             const errors::Error error = timeout->scheduler->unregisterCallback(timeoutCallback->callbackID);
             if (error.errorCode) {
@@ -194,18 +194,18 @@ JSValue timeoutClear(JSContext* jsContext, JSValueConst /* thisValue */, int arg
         const int32_t timerIDInt32 = static_cast<int32_t>(timerID);
 
         // If no such timerID exists, return.
-        if (!timeout->timerCallbackIDs.contains(timerIDInt32)) {
+        if (!timeout->registry.contains(timerIDInt32)) {
             return JS_UNDEFINED;
         }
 
         // Else unregister the timeout callback.
-        const int64_t callbackID = timeout->timerCallbackIDs.at(timerIDInt32);
+        const int64_t callbackID = timeout->registry.at(timerIDInt32);
         const errors::Error error = timeout->scheduler->unregisterCallback(callbackID);
         if (error.errorCode) {
             return JS_ThrowInternalError(jsContext, "timeoutClear: %s", error.toString().c_str());
         }
-        if (timeout->timerCallbackIDs.contains(timerIDInt32) && timeout->timerCallbackIDs.at(timerIDInt32) == callbackID) {
-            timeout->timerCallbackIDs.erase(timerIDInt32);
+        if (timeout->registry.contains(timerIDInt32) && timeout->registry.at(timerIDInt32) == callbackID) {
+            timeout->registry.erase(timerIDInt32);
         }
         return JS_UNDEFINED;
     } catch (const std::bad_alloc&) {

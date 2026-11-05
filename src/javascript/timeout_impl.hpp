@@ -19,7 +19,7 @@ class Scheduler;
 struct Timeout {
     std::shared_ptr<Scheduler> scheduler = nullptr;
     int32_t timerIDCounter = 0; // Last allocated timer ID; allocation starts at 1.
-    std::map<int32_t, int64_t> timerCallbackIDs = {}; // JS timer ID -> scheduler callback ID.
+    std::map<int32_t, int64_t> registry = {}; // JS timer ID -> scheduler callback ID.
 };
 
 // callback: function; delay: normalized integer milliseconds in [0, 2147483647].
