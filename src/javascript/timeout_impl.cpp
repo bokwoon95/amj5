@@ -68,11 +68,6 @@ struct TimeoutCallback {
     }
 };
 
-void finalizeTimeout(JSRuntime* /* jsRuntime */, JSValue value) {
-    // QuickJS owns this heap-stored smart pointer, not an untracked Timeout*.
-    const std::unique_ptr<std::shared_ptr<Timeout>> timeout(static_cast<std::shared_ptr<Timeout>*>(JS_GetOpaque(value, JS_GetClassID(value))));
-}
-
 } // namespace
 
 JSValue timeoutSet(JSContext* jsContext, JSValueConst /* thisValue */, int argc, JSValueConst* argv, std::shared_ptr<Timeout> timeout) {
@@ -101,29 +96,43 @@ JSValue timeoutSet(JSContext* jsContext, JSValueConst /* thisValue */, int argc,
         if (JS_ToFloat64(jsContext, &delayMs, argv[1]) < 0) {
             return JS_EXCEPTION;
         }
-        if (!std::isfinite(delayMs) || std::floor(delayMs) != delayMs || delayMs < 0.0 || delayMs > 2147483647.0) {
-            return JS_ThrowRangeError(jsContext, "timeoutSet: arg1: delay must be an integer in [0, 2147483647]");
+        if (!std::isfinite(delayMs) || std::floor(delayMs) != delayMs || delayMs < 0.0 || delayMs > static_cast<double>(std::numeric_limits<int32_t>::max())) {
+            return JS_ThrowRangeError(jsContext, "timeoutSet: arg1: delay must be a positive number within 32-bit signed integer range");
         }
 
+        // Ensure now + delay is within chrono::steady_clock::time_point's
+        // maximum range.
         const chrono::steady_clock::time_point now = chrono::steady_clock::now();
         const chrono::milliseconds delayDuration(static_cast<int64_t>(delayMs));
         if (now > chrono::steady_clock::time_point::max() - delayDuration) {
             return JS_ThrowRangeError(jsContext, "timeoutSet: timer deadline is out of range");
         }
-        if (timeout->timerCallbackIDs.size() >= static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
-            return JS_ThrowRangeError(jsContext, "timeoutSet: timerIDs exhausted");
-        }
+
+        // Increment timerIDCounter to the next available timerID. timerIDs can
+        // be reused (the counter wraps around starting from 1), so after
+        // wrapping around it's possible that the next timerID is still in use
+        // (check the timerCallbackIDs map) so we have to keep incrementing
+        // until we find one that is not in use.
         while (true) {
+            // If the timerCallbackIDs map is full, there are no more available
+            // timerIDs.
+            if (timeout->timerCallbackIDs.size() >= static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
+                return JS_ThrowRangeError(jsContext, "timeoutSet: timerIDs exhausted");
+            }
+            // Increment the timerIDCounter by 1, wrapping when we hit
+            // int32_t's maximum value.
             if (timeout->timerIDCounter == std::numeric_limits<int32_t>::max()) {
                 timeout->timerIDCounter = 1;
             } else {
                 timeout->timerIDCounter++;
             }
+            // If the timerID is in use, try again.
             if (timeout->timerCallbackIDs.contains(timeout->timerIDCounter)) {
                 continue;
             }
             break;
         }
+
         const std::shared_ptr<TimeoutCallback> timeoutCallback = std::make_shared<TimeoutCallback>();
         timeoutCallback->jsContext = jsContext;
         timeoutCallback->callback = JS_DupValue(jsContext, callback);
@@ -164,35 +173,39 @@ JSValue timeoutClear(JSContext* jsContext, JSValueConst /* thisValue */, int arg
         if (timeout == nullptr) {
             return JS_ThrowInternalError(jsContext, "timeoutClear: missing timeout");
         }
+        if (timeout->scheduler == nullptr) {
+            return JS_ThrowInternalError(jsContext, "timeoutSet: missing scheduler");
+        }
         if (argc < 1) {
             return JS_ThrowTypeError(jsContext, "timeoutClear: requires 1 argument (%d provided)", argc);
         }
+
+        // Get timerID number.
         if (!JS_IsNumber(argv[0])) {
             return JS_ThrowTypeError(jsContext, "timeoutClear: arg0: timerID not a number");
         }
-        double number = 0.0;
-        if (JS_ToFloat64(jsContext, &number, argv[0]) < 0) {
+        double timerID = 0.0;
+        if (JS_ToFloat64(jsContext, &timerID, argv[0]) < 0) {
             return JS_EXCEPTION;
         }
-        if (!std::isfinite(number) || std::floor(number) != number || number < 0.0 || number > 9007199254740991.0) {
-            return JS_ThrowRangeError(jsContext, "timeoutClear: arg0: timerID must be a nonnegative safe integer");
-        }
-        if (timeout->scheduler == nullptr) {
-            return JS_ThrowInternalError(jsContext, "timeoutClear: missing scheduler");
-        }
-        if (number < 1.0 || number > static_cast<double>(std::numeric_limits<int32_t>::max())) {
+        if (!std::isfinite(timerID) || std::floor(timerID) != timerID || timerID < 0.0 || timerID > static_cast<double>(std::numeric_limits<int32_t>::max())) {
             return JS_UNDEFINED;
         }
-        const int32_t timerID = static_cast<int32_t>(number);
-        if (timeout->timerCallbackIDs.contains(timerID)) {
-            const int64_t callbackID = timeout->timerCallbackIDs.at(timerID);
-            const errors::Error error = timeout->scheduler->unregisterCallback(callbackID);
-            if (error.errorCode) {
-                return JS_ThrowInternalError(jsContext, "timeoutClear: %s", error.toString().c_str());
-            }
-            if (timeout->timerCallbackIDs.contains(timerID) && timeout->timerCallbackIDs.at(timerID) == callbackID) {
-                timeout->timerCallbackIDs.erase(timerID);
-            }
+        const int32_t timerIDInt32 = static_cast<int32_t>(timerID);
+
+        // If no such timerID exists, return.
+        if (!timeout->timerCallbackIDs.contains(timerIDInt32)) {
+            return JS_UNDEFINED;
+        }
+
+        // Else unregister the timeout callback.
+        const int64_t callbackID = timeout->timerCallbackIDs.at(timerIDInt32);
+        const errors::Error error = timeout->scheduler->unregisterCallback(callbackID);
+        if (error.errorCode) {
+            return JS_ThrowInternalError(jsContext, "timeoutClear: %s", error.toString().c_str());
+        }
+        if (timeout->timerCallbackIDs.contains(timerIDInt32) && timeout->timerCallbackIDs.at(timerIDInt32) == callbackID) {
+            timeout->timerCallbackIDs.erase(timerIDInt32);
         }
         return JS_UNDEFINED;
     } catch (const std::bad_alloc&) {
@@ -233,6 +246,10 @@ JSModuleDef* createTimeoutImplModule(JSContext* jsContext, std::shared_ptr<Timeo
             }
         }
         if (!JS_IsRegisteredClass(jsRuntime, timeoutClassID)) {
+            const auto finalizeTimeout = [](JSRuntime* /* jsRuntime */, JSValue value) {
+                // QuickJS owns this heap-stored smart pointer, not an untracked Timeout*.
+                const std::unique_ptr<std::shared_ptr<Timeout>> timeout(static_cast<std::shared_ptr<Timeout>*>(JS_GetOpaque(value, JS_GetClassID(value))));
+            };
             const JSClassDef definition = {
                 .class_name = "Timeout",
                 .finalizer = finalizeTimeout,
