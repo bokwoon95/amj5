@@ -17,11 +17,18 @@
 #include <memory>
 #include <mutex>
 #include <new>
+#include <vector>
 
 namespace amj::javascript {
 namespace chrono = std::chrono;
 namespace errors = amj::errors;
 namespace {
+
+struct TimeoutFunction {
+    const char* name = nullptr;
+    int argc = 0;
+    JSValue (*function)(JSContext*, JSValueConst, int, JSValueConst*, std::shared_ptr<Timeout>) = nullptr;
+};
 
 std::mutex timeoutClassIDMutex = {};
 std::map<JSRuntime*, JSClassID> timeoutClassIDMap = {}; // NOLINT(bugprone-throwing-static-initialization): startup allocation failure may terminate.
@@ -268,41 +275,52 @@ JSModuleDef* createTimeoutImplModule(JSContext* jsContext, std::shared_ptr<Timeo
         }
         std::unique_ptr<std::shared_ptr<Timeout>> ownedTimeout = std::make_unique<std::shared_ptr<Timeout>>(timeout);
         JS_SetOpaque(object.value, ownedTimeout.release());
+        static const std::vector<TimeoutFunction> functionList = {
+            {
+                .name = "timeoutSet",
+                .argc = 2,
+                .function = timeoutSet,
+            },
+            {
+                .name = "timeoutClear",
+                .argc = 1,
+                .function = timeoutClear,
+            },
+        };
         JSModuleDef* jsModuleDef = JS_NewCModule(jsContext, "amj:timeout_impl", [](JSContext* jsContext, JSModuleDef* jsModuleDef) -> int {
             const ScopedJSValue object(jsContext, JS_GetModulePrivateValue(jsContext, jsModuleDef));
             if (JS_IsException(object.value)) {
                 return -1;
             }
+            const auto functionCallback = [](JSContext* jsContext, JSValueConst thisValue, int argc, JSValueConst* argv, int magic, JSValueConst* functionData) -> JSValue {
+                // QuickJS retains the shared holder and supplies it to each call.
+                const JSValueConst holder = functionData[0];
+                const std::shared_ptr<Timeout>* timeout = static_cast<std::shared_ptr<Timeout>*>(JS_GetOpaque2(jsContext, holder, JS_GetClassID(holder)));
+                if (timeout == nullptr) {
+                    return JS_EXCEPTION;
+                }
+                if (magic < 0 || static_cast<std::size_t>(magic) >= functionList.size()) {
+                    return JS_ThrowInternalError(jsContext, "Invalid timeout function index");
+                }
+                return functionList.at(static_cast<std::size_t>(magic)).function(jsContext, thisValue, argc, argv, *timeout);
+            };
             JSValue functionData = object.value;
-            const JSValue setFunction = JS_NewCFunctionData(jsContext, [](JSContext* jsContext, JSValueConst thisValue, int argc, JSValueConst* argv, int /* magic */, JSValueConst* functionData) -> JSValue {
-                // QuickJS supplies one function-data value, retained by the function.
-                const JSValueConst holder = functionData[0];
-                const std::shared_ptr<Timeout>* timeout = static_cast<std::shared_ptr<Timeout>*>(JS_GetOpaque2(jsContext, holder, JS_GetClassID(holder)));
-                if (timeout == nullptr) {
-                    return JS_EXCEPTION;
+            for (std::size_t index = 0; index < functionList.size(); index++) {
+                const TimeoutFunction& timeoutFunction = functionList.at(index);
+                const JSValue function = JS_NewCFunctionData(jsContext, functionCallback, timeoutFunction.argc, static_cast<int>(index), 1, &functionData);
+                if (JS_IsException(function) || JS_SetModuleExport(jsContext, jsModuleDef, timeoutFunction.name, function) < 0) {
+                    return -1;
                 }
-                return timeoutSet(jsContext, thisValue, argc, argv, *timeout);
-            },
-                                                            2, 0, 1, &functionData);
-            if (JS_IsException(setFunction) || JS_SetModuleExport(jsContext, jsModuleDef, "timeoutSet", setFunction) < 0) {
-                return -1;
-            }
-            const JSValue clearFunction = JS_NewCFunctionData(jsContext, [](JSContext* jsContext, JSValueConst thisValue, int argc, JSValueConst* argv, int /* magic */, JSValueConst* functionData) -> JSValue {
-                const JSValueConst holder = functionData[0];
-                const std::shared_ptr<Timeout>* timeout = static_cast<std::shared_ptr<Timeout>*>(JS_GetOpaque2(jsContext, holder, JS_GetClassID(holder)));
-                if (timeout == nullptr) {
-                    return JS_EXCEPTION;
-                }
-                return timeoutClear(jsContext, thisValue, argc, argv, *timeout);
-            },
-                                                              1, 0, 1, &functionData);
-            if (JS_IsException(clearFunction) || JS_SetModuleExport(jsContext, jsModuleDef, "timeoutClear", clearFunction) < 0) {
-                return -1;
             }
             return 0;
         });
-        if (jsModuleDef == nullptr || JS_AddModuleExport(jsContext, jsModuleDef, "timeoutSet") < 0 || JS_AddModuleExport(jsContext, jsModuleDef, "timeoutClear") < 0) {
+        if (jsModuleDef == nullptr) {
             return nullptr;
+        }
+        for (const TimeoutFunction& timeoutFunction : functionList) {
+            if (JS_AddModuleExport(jsContext, jsModuleDef, timeoutFunction.name) < 0) {
+                return nullptr;
+            }
         }
         if (JS_SetModulePrivateValue(jsContext, jsModuleDef, JS_DupValue(jsContext, object.value)) < 0) {
             return nullptr;
