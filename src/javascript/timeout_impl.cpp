@@ -38,11 +38,15 @@ struct TimeoutCallback {
     int64_t callbackID = 0;
 
     ~TimeoutCallback() {
-        // A timer ID may have been reused while this callback was executing.
-        if (timeout != nullptr && timeout->registry.contains(timerID) && timeout->registry.at(timerID) == callbackID) {
-            timeout->registry.erase(timerID);
+        try {
+            // A timer ID may have been reused while this callback was executing.
+            if (timeout != nullptr && timeout->registry.contains(timerID) && timeout->registry.at(timerID) == callbackID) {
+                timeout->registry.erase(timerID);
+            }
+            JS_FreeValue(jsContext, callback);
+        } catch (...) {
+            std::terminate();
         }
-        JS_FreeValue(jsContext, callback);
     }
 
     errors::Error call() {

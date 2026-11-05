@@ -143,8 +143,8 @@ TypeScript cannot navigate into C++.
 The outer owner loop drains all QuickJS jobs, checks its awaited Promise, then
 calls `scheduler.runNext()` to wait for and execute one native callback. Repeat.
 The scheduler does not execute the QuickJS job queue itself. Callback and cleanup
-registration consume `std::move_only_function<errors::Error()>` values; pass named
-move-only callables with `std::move`. Node extraction and map swaps keep callable
+registration accept `std::function<errors::Error()>` values, so callables must be
+copyable; pass named callables with `std::move` to avoid copying. Node extraction and map swaps keep callable
 movement and destruction outside the mutex, including registration failure paths.
 
 HTTP workers access native buffers only and call `markReady()`. Their request
