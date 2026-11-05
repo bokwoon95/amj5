@@ -24,12 +24,6 @@ namespace chrono = std::chrono;
 namespace errors = amj::errors;
 namespace {
 
-struct TimeoutFunction {
-    const char* name = nullptr;
-    int argc = 0;
-    JSValue (*function)(JSContext*, JSValueConst, int, JSValueConst*, std::shared_ptr<Timeout>) = nullptr;
-};
-
 std::mutex timeoutClassIDMutex = {};
 std::map<JSRuntime*, JSClassID> timeoutClassIDMap = {}; // NOLINT(bugprone-throwing-static-initialization): startup allocation failure may terminate.
 
@@ -275,16 +269,22 @@ JSModuleDef* createTimeoutImplModule(JSContext* jsContext, std::shared_ptr<Timeo
         }
         std::unique_ptr<std::shared_ptr<Timeout>> ownedTimeout = std::make_unique<std::shared_ptr<Timeout>>(timeout);
         JS_SetOpaque(object.value, ownedTimeout.release());
-        static const std::vector<TimeoutFunction> functionList = {
+
+        struct FunctionEntry {
+            const char* name = nullptr;
+            JSValue (*function)(JSContext*, JSValueConst, int, JSValueConst*, std::shared_ptr<Timeout>) = nullptr;
+            int argc = 0;
+        };
+        static const std::vector<FunctionEntry> functionEntries = {
             {
                 .name = "timeoutSet",
-                .argc = 2,
                 .function = timeoutSet,
+                .argc = 2,
             },
             {
                 .name = "timeoutClear",
-                .argc = 1,
                 .function = timeoutClear,
+                .argc = 1,
             },
         };
         JSModuleDef* jsModuleDef = JS_NewCModule(jsContext, "amj:timeout_impl", [](JSContext* jsContext, JSModuleDef* jsModuleDef) -> int {
@@ -299,14 +299,14 @@ JSModuleDef* createTimeoutImplModule(JSContext* jsContext, std::shared_ptr<Timeo
                 if (timeout == nullptr) {
                     return JS_EXCEPTION;
                 }
-                if (magic < 0 || static_cast<std::size_t>(magic) >= functionList.size()) {
+                if (magic < 0 || static_cast<std::size_t>(magic) >= functionEntries.size()) {
                     return JS_ThrowInternalError(jsContext, "Invalid timeout function index");
                 }
-                return functionList.at(static_cast<std::size_t>(magic)).function(jsContext, thisValue, argc, argv, *timeout);
+                return functionEntries.at(static_cast<std::size_t>(magic)).function(jsContext, thisValue, argc, argv, *timeout);
             };
             JSValue functionData = object.value;
-            for (std::size_t index = 0; index < functionList.size(); index++) {
-                const TimeoutFunction& timeoutFunction = functionList.at(index);
+            for (std::size_t index = 0; index < functionEntries.size(); index++) {
+                const FunctionEntry& timeoutFunction = functionEntries.at(index);
                 const JSValue function = JS_NewCFunctionData(jsContext, functionCallback, timeoutFunction.argc, static_cast<int>(index), 1, &functionData);
                 if (JS_IsException(function) || JS_SetModuleExport(jsContext, jsModuleDef, timeoutFunction.name, function) < 0) {
                     return -1;
@@ -317,7 +317,7 @@ JSModuleDef* createTimeoutImplModule(JSContext* jsContext, std::shared_ptr<Timeo
         if (jsModuleDef == nullptr) {
             return nullptr;
         }
-        for (const TimeoutFunction& timeoutFunction : functionList) {
+        for (const FunctionEntry& timeoutFunction : functionEntries) {
             if (JS_AddModuleExport(jsContext, jsModuleDef, timeoutFunction.name) < 0) {
                 return nullptr;
             }
