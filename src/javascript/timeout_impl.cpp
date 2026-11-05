@@ -238,6 +238,8 @@ JSModuleDef* createTimeoutImplModule(JSContext* jsContext, Timeout& timeout) {
             }
         }
 
+        // Register the timeoutClassID if not already registered so that
+        // JS_SetOpaque and JS_GetOpaque can work.
         if (!JS_IsRegisteredClass(jsRuntime, timeoutClassID)) {
             const JSClassDef jsClassDef = {
                 .class_name = "Timeout",
@@ -253,12 +255,14 @@ JSModuleDef* createTimeoutImplModule(JSContext* jsContext, Timeout& timeout) {
             }
         }
 
+        // Create a modulePrivateValue JSValue and assign the Timeout* to it.
         ScopedJSValue modulePrivateValue(jsContext, JS_NewObjectProtoClass(jsContext, JS_NULL, timeoutClassID));
         if (JS_IsException(modulePrivateValue.value)) {
             return nullptr;
         }
         JS_SetOpaque(modulePrivateValue.value, &timeout);
 
+        // Define the function entries to register.
         struct FunctionEntry {
             const char* name = nullptr;
             JSValue (*function)(JSContext*, JSValueConst, int, JSValueConst*, Timeout&) = nullptr;
@@ -277,11 +281,14 @@ JSModuleDef* createTimeoutImplModule(JSContext* jsContext, Timeout& timeout) {
             },
         };
 
+        // Create a new JS module.
         JSModuleDef* jsModuleDef = JS_NewCModule(jsContext, "amj:timeout_impl", [](JSContext* jsContext, JSModuleDef* jsModuleDef) -> int {
+            // Extract the modulePrivateValue from the jsContext.
             const ScopedJSValue modulePrivateValue(jsContext, JS_GetModulePrivateValue(jsContext, jsModuleDef));
             if (JS_IsException(modulePrivateValue.value)) {
                 return -1;
             }
+
             const auto jsCFunctionData = [](JSContext* jsContext, JSValueConst thisValue, int argc, JSValueConst* argv, int magic, JSValueConst* functionData) -> JSValue {
                 // QuickJS retains the JS carrier, which borrows the native Timeout.
                 Timeout* timeout = static_cast<Timeout*>(JS_GetOpaque2(jsContext, functionData[0], JS_GetClassID(functionData[0])));
