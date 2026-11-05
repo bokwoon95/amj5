@@ -251,14 +251,14 @@ JSModuleDef* createTimeoutImplModule(JSContext* jsContext, std::shared_ptr<Timeo
                 // QuickJS owns this heap-stored smart pointer, not an untracked Timeout*.
                 const std::unique_ptr<std::shared_ptr<Timeout>> timeout(static_cast<std::shared_ptr<Timeout>*>(JS_GetOpaque(value, JS_GetClassID(value))));
             };
-            const JSClassDef definition = {
+            const JSClassDef jsClassDef = {
                 .class_name = "Timeout",
                 .finalizer = timeoutFinalizer,
                 .gc_mark = nullptr,
                 .call = nullptr,
                 .exotic = nullptr,
             };
-            if (JS_NewClass(jsRuntime, timeoutClassID, &definition) < 0) {
+            if (JS_NewClass(jsRuntime, timeoutClassID, &jsClassDef) < 0) {
                 JS_ThrowOutOfMemory(jsContext);
                 return nullptr;
             }
