@@ -247,13 +247,13 @@ JSModuleDef* createTimeoutImplModule(JSContext* jsContext, std::shared_ptr<Timeo
             }
         }
         if (!JS_IsRegisteredClass(jsRuntime, timeoutClassID)) {
-            const auto finalizeTimeout = [](JSRuntime* /* jsRuntime */, JSValue value) {
+            const auto timeoutFinalizer = [](JSRuntime* /* jsRuntime */, JSValue value) {
                 // QuickJS owns this heap-stored smart pointer, not an untracked Timeout*.
                 const std::unique_ptr<std::shared_ptr<Timeout>> timeout(static_cast<std::shared_ptr<Timeout>*>(JS_GetOpaque(value, JS_GetClassID(value))));
             };
             const JSClassDef definition = {
                 .class_name = "Timeout",
-                .finalizer = finalizeTimeout,
+                .finalizer = timeoutFinalizer,
                 .gc_mark = nullptr,
                 .call = nullptr,
                 .exotic = nullptr,
