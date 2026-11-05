@@ -27,11 +27,6 @@ namespace {
 std::mutex timeoutClassIDMutex = {};
 std::map<JSRuntime*, JSClassID> timeoutClassIDMap = {}; // NOLINT(bugprone-throwing-static-initialization): startup allocation failure may terminate.
 
-void releaseTimeoutClassID(JSRuntime* jsRuntime, void* /* argument */) {
-    const std::lock_guard<std::mutex> lock(timeoutClassIDMutex);
-    timeoutClassIDMap.erase(jsRuntime);
-}
-
 // Owned by the scheduler callback. Destruction handles cancellation and clear()
 // without reentering the scheduler.
 struct TimeoutCallback {
@@ -231,6 +226,8 @@ JSModuleDef* createTimeoutImplModule(JSContext* jsContext, std::shared_ptr<Timeo
             JS_ThrowInternalError(jsContext, "createTimeoutImplModule: missing scheduler");
             return nullptr;
         }
+
+        // Get the jsRuntime and jsClassID (for Timeout).
         JSRuntime* jsRuntime = JS_GetRuntime(jsContext);
         JSClassID timeoutClassID = 0;
         {
@@ -240,12 +237,17 @@ JSModuleDef* createTimeoutImplModule(JSContext* jsContext, std::shared_ptr<Timeo
             } else {
                 JS_NewClassID(jsRuntime, &timeoutClassID);
                 timeoutClassIDMap.insert_or_assign(jsRuntime, timeoutClassID);
-                if (JS_AddRuntimeFinalizer(jsRuntime, releaseTimeoutClassID, nullptr) < 0) {
+                const auto timeoutClassFinalizer = [](JSRuntime* jsRuntime, void* /* argument */) {
+                    const std::lock_guard<std::mutex> lock(timeoutClassIDMutex);
+                    timeoutClassIDMap.erase(jsRuntime);
+                };
+                if (JS_AddRuntimeFinalizer(jsRuntime, timeoutClassFinalizer, nullptr) < 0) {
                     timeoutClassIDMap.erase(jsRuntime);
                     throw std::bad_alloc();
                 }
             }
         }
+
         if (!JS_IsRegisteredClass(jsRuntime, timeoutClassID)) {
             const auto timeoutFinalizer = [](JSRuntime* /* jsRuntime */, JSValue value) {
                 // QuickJS owns this heap-stored smart pointer, not an untracked Timeout*.
@@ -263,6 +265,7 @@ JSModuleDef* createTimeoutImplModule(JSContext* jsContext, std::shared_ptr<Timeo
                 return nullptr;
             }
         }
+
         const ScopedJSValue object(jsContext, JS_NewObjectProtoClass(jsContext, JS_NULL, timeoutClassID));
         if (JS_IsException(object.value)) {
             return nullptr;
