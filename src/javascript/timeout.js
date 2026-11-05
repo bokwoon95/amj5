@@ -1,12 +1,11 @@
 // @ts-check
 // Public timer semantics over the C++ scheduler-backed implementation.
-import { timeoutSet, timeoutClear } from "amj:timeout_impl";
+import { timeoutClear, timeoutSet } from "amj:timeout_impl";
 
 /**
- * @template {Array<unknown>} Arguments
- * @param {(...args: Arguments) => void} callback
+ * @param {(...args: Array<unknown>) => void} callback
  * @param {number} [delay]
- * @param {Arguments} args
+ * @param {Array<unknown>} args
  * @returns {number}
  */
 export function setTimeout(callback, delay = 0, ...args) {
@@ -23,7 +22,8 @@ export function setTimeout(callback, delay = 0, ...args) {
     milliseconds = 2147483647;
   }
   milliseconds = Math.trunc(milliseconds);
-  return timeoutSet(() => callback(...args), milliseconds);
+  const timerID = timeoutSet(function() { callback(...args) }, milliseconds);
+  return timerID;
 }
 
 /**
