@@ -60,8 +60,6 @@
 - Use emplacement only where modernize-use-emplace requires it; do not disable or suppress that check.
 - Preserve bulk/range operations such as .insert(end(), first, last); do not replace them with single-element loops.
 - Preserve existing semantics: guard writes with .contains() when existing entries must not be overwritten.
-- DO NOT use raw pointers, and references are structly only allowed for local use. Only values and smart pointers are allowed to outlive a function return.
-- Prefer values. Struct/class fields and retained callback captures must use values or smart pointers, not raw pointers or references. References are only allowed for local borrowing; raw pointers only where required by external APIs.
 
 ## JavaScript
 - JSDoc: Use () => Type, not { (): Type }, for plain function types.

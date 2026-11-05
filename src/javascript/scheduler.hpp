@@ -28,8 +28,9 @@ enum class ErrorCode : std::uint8_t {
 [[nodiscard]] std::error_code make_error_code(ErrorCode errorCode);
 
 // All methods except markReady() require the constructing thread. Callbacks and
-// cleanups execute outside the mutex. Their captures are copied and destroyed on
-// that thread, outside the mutex. During clear(), registration and runNext() are
+// cleanups execute outside the mutex. Registered callables are move-only and
+// consumed by registration; captures are moved and destroyed on that thread,
+// outside the mutex. During clear(), registration and runNext() are
 // rejected; nested clear() is a no-op. Workers must stop/join before the scheduler
 // is destroyed; registered cleanups may do this. The borrowed context must outlive
 // the scheduler.
@@ -50,7 +51,7 @@ class Scheduler {
 
     // nullopt means readiness is explicit. An elapsed callAt or markReady() makes the
     // callback runnable. IDs are never reused, including across clear().
-    [[nodiscard]] std::expected<int64_t, errors::Error> registerCallback(const std::function<errors::Error()>& callback, std::optional<chrono::steady_clock::time_point> optionalTriggerTime);
+    [[nodiscard]] std::expected<int64_t, errors::Error> registerCallback(std::move_only_function<errors::Error()> callback, std::optional<chrono::steady_clock::time_point> optionalTriggerTime);
 
     // Removes the callback and its readiness timestamp/deadline; invokes no cleanup.
     // Unknown IDs are ignored.
@@ -63,7 +64,7 @@ class Scheduler {
 
     // Cleanups only cancel native operations and release resources. They must not
     // execute JS or modify the pending JS exception; JS cleanup belongs in finally.
-    [[nodiscard]] std::expected<int64_t, errors::Error> registerCleanup(const std::function<errors::Error()>& cleanup);
+    [[nodiscard]] std::expected<int64_t, errors::Error> registerCleanup(std::move_only_function<errors::Error()> cleanup);
 
     // Removes before invoking, so repeat/reentrant calls are no-ops. Does not
     // unregister callbacks: modules manage those independently.
@@ -87,10 +88,10 @@ class Scheduler {
     // The mutex protects all fields below it. Callbacks and cleanups execute
     // outside the lock. Fields above it are construction-only or self-synchronized.
     std::mutex mutex = {};
-    std::map<int64_t, std::function<errors::Error()>> callbackMap = {};
+    std::map<int64_t, std::move_only_function<errors::Error()>> callbackMap = {};
     std::map<int64_t, chrono::steady_clock::time_point> triggerTimeMap = {};
     std::map<int64_t, chrono::steady_clock::time_point> readyTimeMap = {};
-    std::map<int64_t, std::function<errors::Error()>> cleanupMap = {};
+    std::map<int64_t, std::move_only_function<errors::Error()>> cleanupMap = {};
     int64_t callbackIDCounter = 0;
     int64_t cleanupIDCounter = 0;
     bool clearing = false;

@@ -17,6 +17,7 @@
 #include <memory>
 #include <mutex>
 #include <new>
+#include <utility>
 #include <vector>
 
 namespace amj::javascript {
@@ -32,13 +33,12 @@ std::map<JSRuntime*, JSClassID> timeoutClassIDMap = {}; // NOLINT(bugprone-throw
 struct TimeoutCallback {
     JSContext* jsContext = nullptr;
     JSValue callback = JS_UNDEFINED;
-    std::weak_ptr<Timeout> weakTimeout = {};
+    Timeout* timeout = nullptr; // Owner keeps this alive through callback destruction.
     int32_t timerID = 0;
     int64_t callbackID = 0;
 
     ~TimeoutCallback() {
         // A timer ID may have been reused while this callback was executing.
-        const std::shared_ptr<Timeout> timeout = weakTimeout.lock();
         if (timeout != nullptr && timeout->registry.contains(timerID) && timeout->registry.at(timerID) == callbackID) {
             timeout->registry.erase(timerID);
         }
@@ -46,10 +46,6 @@ struct TimeoutCallback {
     }
 
     errors::Error call() {
-        const std::shared_ptr<Timeout> timeout = weakTimeout.lock();
-        if (timeout == nullptr) {
-            return {};
-        }
         if (timeout->registry.contains(timerID) && timeout->registry.at(timerID) == callbackID) {
             timeout->registry.erase(timerID);
         }
@@ -66,12 +62,9 @@ struct TimeoutCallback {
 
 } // namespace
 
-JSValue timeoutSet(JSContext* jsContext, JSValueConst /* thisValue */, int argc, JSValueConst* argv, std::shared_ptr<Timeout> timeout) {
+JSValue timeoutSet(JSContext* jsContext, JSValueConst /* thisValue */, int argc, JSValueConst* argv, Timeout& timeout) {
     try {
-        if (timeout == nullptr) {
-            return JS_ThrowInternalError(jsContext, "timeoutSet: missing timeout");
-        }
-        if (timeout->scheduler == nullptr) {
+        if (timeout.scheduler == nullptr) {
             return JS_ThrowInternalError(jsContext, "timeoutSet: missing scheduler");
         }
         if (argc < 2) {
@@ -82,14 +75,15 @@ JSValue timeoutSet(JSContext* jsContext, JSValueConst /* thisValue */, int argc,
         if (!JS_IsFunction(jsContext, argv[0])) {
             return JS_ThrowTypeError(jsContext, "timeoutSet: arg0: callback not a function");
         }
-        const JSValue callback = argv[0];
+        ScopedJSValue callback(jsContext, JS_DupValue(jsContext, argv[0]));
 
         // Get delayMs number.
         if (!JS_IsNumber(argv[1])) {
             return JS_ThrowTypeError(jsContext, "timeoutSet: arg1: delay not a number");
         }
         double delayMs = 0.0;
-        if (JS_ToFloat64(jsContext, &delayMs, argv[1]) < 0) {
+        const int status = JS_ToFloat64(jsContext, &delayMs, argv[1]);
+        if (status < 0) {
             return JS_EXCEPTION;
         }
         if (!std::isfinite(delayMs) || std::floor(delayMs) != delayMs || delayMs < 0.0 || delayMs > static_cast<double>(std::numeric_limits<int32_t>::max())) {
@@ -112,46 +106,47 @@ JSValue timeoutSet(JSContext* jsContext, JSValueConst /* thisValue */, int argc,
         while (true) {
             // If the timerCallbackIDs map is full, there are no more available
             // timerIDs.
-            if (timeout->registry.size() >= static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
+            if (timeout.registry.size() >= static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
                 return JS_ThrowRangeError(jsContext, "timeoutSet: timerIDs exhausted");
             }
             // Increment the timerIDCounter by 1, wrapping when we hit
             // int32_t's maximum value.
-            if (timeout->timerIDCounter == std::numeric_limits<int32_t>::max()) {
-                timeout->timerIDCounter = 1;
+            if (timeout.timerIDCounter == std::numeric_limits<int32_t>::max()) {
+                timeout.timerIDCounter = 1;
             } else {
-                timeout->timerIDCounter++;
+                timeout.timerIDCounter++;
             }
             // If the timerID is in use, try again.
-            if (timeout->registry.contains(timeout->timerIDCounter)) {
+            if (timeout.registry.contains(timeout.timerIDCounter)) {
                 continue;
             }
             break;
         }
+        const int32_t timerID = timeout.timerIDCounter;
 
         const std::shared_ptr<TimeoutCallback> timeoutCallback = std::make_shared<TimeoutCallback>();
         timeoutCallback->jsContext = jsContext;
-        timeoutCallback->callback = JS_DupValue(jsContext, callback);
-        timeoutCallback->weakTimeout = timeout;
-        timeoutCallback->timerID = timeout->timerIDCounter;
-        const auto schedulerCallback = [timeoutCallback]() -> errors::Error {
+        timeoutCallback->callback = callback.release();
+        timeoutCallback->timeout = &timeout;
+        timeoutCallback->timerID = timerID;
+        auto schedulerCallback = [timeoutCallback]() -> errors::Error {
             return timeoutCallback->call();
         };
-        const std::expected<int64_t, errors::Error> callbackID = timeout->scheduler->registerCallback(schedulerCallback, now + delayDuration);
+        const std::expected<int64_t, errors::Error> callbackID = timeout.scheduler->registerCallback(std::move(schedulerCallback), now + delayDuration);
         if (!callbackID.has_value()) {
             return JS_ThrowInternalError(jsContext, "timeoutSet: %s", callbackID.error().toString().c_str());
         }
         timeoutCallback->callbackID = callbackID.value();
         try {
-            timeout->registry.insert_or_assign(timeoutCallback->timerID, timeoutCallback->callbackID);
+            timeout.registry.insert_or_assign(timerID, callbackID.value());
         } catch (...) {
-            const errors::Error error = timeout->scheduler->unregisterCallback(timeoutCallback->callbackID);
+            const errors::Error error = timeout.scheduler->unregisterCallback(callbackID.value());
             if (error.errorCode) {
                 std::terminate();
             }
             throw;
         }
-        return JS_NewInt32(jsContext, timeoutCallback->timerID);
+        return JS_NewInt32(jsContext, timerID);
     } catch (const std::bad_alloc&) {
         return JS_ThrowOutOfMemory(jsContext);
     } catch (const std::exception& exception) {
@@ -164,13 +159,10 @@ JSValue timeoutSet(JSContext* jsContext, JSValueConst /* thisValue */, int argc,
     }
 }
 
-JSValue timeoutClear(JSContext* jsContext, JSValueConst /* thisValue */, int argc, JSValueConst* argv, std::shared_ptr<Timeout> timeout) {
+JSValue timeoutClear(JSContext* jsContext, JSValueConst /* thisValue */, int argc, JSValueConst* argv, Timeout& timeout) {
     try {
-        if (timeout == nullptr) {
-            return JS_ThrowInternalError(jsContext, "timeoutClear: missing timeout");
-        }
-        if (timeout->scheduler == nullptr) {
-            return JS_ThrowInternalError(jsContext, "timeoutSet: missing scheduler");
+        if (timeout.scheduler == nullptr) {
+            return JS_ThrowInternalError(jsContext, "timeoutClear: missing scheduler");
         }
         if (argc < 1) {
             return JS_ThrowTypeError(jsContext, "timeoutClear: requires 1 argument (%d provided)", argc);
@@ -181,7 +173,8 @@ JSValue timeoutClear(JSContext* jsContext, JSValueConst /* thisValue */, int arg
             return JS_ThrowTypeError(jsContext, "timeoutClear: arg0: timerID not a number");
         }
         double timerID = 0.0;
-        if (JS_ToFloat64(jsContext, &timerID, argv[0]) < 0) {
+        const int status = JS_ToFloat64(jsContext, &timerID, argv[0]);
+        if (status < 0) {
             return JS_EXCEPTION;
         }
         if (!std::isfinite(timerID) || std::floor(timerID) != timerID || timerID < 0.0 || timerID > static_cast<double>(std::numeric_limits<int32_t>::max())) {
@@ -190,18 +183,18 @@ JSValue timeoutClear(JSContext* jsContext, JSValueConst /* thisValue */, int arg
         const int32_t timerIDInt32 = static_cast<int32_t>(timerID);
 
         // If no such timerID exists, return.
-        if (!timeout->registry.contains(timerIDInt32)) {
+        if (!timeout.registry.contains(timerIDInt32)) {
             return JS_UNDEFINED;
         }
 
         // Else unregister the timeout callback.
-        const int64_t callbackID = timeout->registry.at(timerIDInt32);
-        const errors::Error error = timeout->scheduler->unregisterCallback(callbackID);
+        const int64_t callbackID = timeout.registry.at(timerIDInt32);
+        const errors::Error error = timeout.scheduler->unregisterCallback(callbackID);
         if (error.errorCode) {
             return JS_ThrowInternalError(jsContext, "timeoutClear: %s", error.toString().c_str());
         }
-        if (timeout->registry.contains(timerIDInt32) && timeout->registry.at(timerIDInt32) == callbackID) {
-            timeout->registry.erase(timerIDInt32);
+        if (timeout.registry.contains(timerIDInt32) && timeout.registry.at(timerIDInt32) == callbackID) {
+            timeout.registry.erase(timerIDInt32);
         }
         return JS_UNDEFINED;
     } catch (const std::bad_alloc&) {
@@ -216,18 +209,14 @@ JSValue timeoutClear(JSContext* jsContext, JSValueConst /* thisValue */, int arg
     }
 }
 
-JSModuleDef* createTimeoutImplModule(JSContext* jsContext, std::shared_ptr<Timeout> timeout) {
+JSModuleDef* createTimeoutImplModule(JSContext* jsContext, Timeout& timeout) {
     try {
-        if (timeout == nullptr) {
-            JS_ThrowInternalError(jsContext, "createTimeoutImplModule: missing timeout");
-            return nullptr;
-        }
-        if (timeout->scheduler == nullptr) {
+        if (timeout.scheduler == nullptr) {
             JS_ThrowInternalError(jsContext, "createTimeoutImplModule: missing scheduler");
             return nullptr;
         }
 
-        // Get the jsRuntime and jsClassID (for Timeout).
+        // Get the jsRuntime and timeoutClassID.
         JSRuntime* jsRuntime = JS_GetRuntime(jsContext);
         JSClassID timeoutClassID = 0;
         {
@@ -237,11 +226,12 @@ JSModuleDef* createTimeoutImplModule(JSContext* jsContext, std::shared_ptr<Timeo
             } else {
                 JS_NewClassID(jsRuntime, &timeoutClassID);
                 timeoutClassIDMap.insert_or_assign(jsRuntime, timeoutClassID);
-                const auto timeoutClassFinalizer = [](JSRuntime* jsRuntime, void* /* argument */) {
+                const auto jsRuntimeFinalizer = [](JSRuntime* jsRuntime, void* /* argument */) {
                     const std::lock_guard<std::mutex> lock(timeoutClassIDMutex);
                     timeoutClassIDMap.erase(jsRuntime);
                 };
-                if (JS_AddRuntimeFinalizer(jsRuntime, timeoutClassFinalizer, nullptr) < 0) {
+                const int status = JS_AddRuntimeFinalizer(jsRuntime, jsRuntimeFinalizer, nullptr);
+                if (status < 0) {
                     timeoutClassIDMap.erase(jsRuntime);
                     throw std::bad_alloc();
                 }
@@ -249,33 +239,29 @@ JSModuleDef* createTimeoutImplModule(JSContext* jsContext, std::shared_ptr<Timeo
         }
 
         if (!JS_IsRegisteredClass(jsRuntime, timeoutClassID)) {
-            const auto timeoutFinalizer = [](JSRuntime* /* jsRuntime */, JSValue value) {
-                // QuickJS owns this heap-stored smart pointer, not an untracked Timeout*.
-                const std::unique_ptr<std::shared_ptr<Timeout>> timeout(static_cast<std::shared_ptr<Timeout>*>(JS_GetOpaque(value, JS_GetClassID(value))));
-            };
             const JSClassDef jsClassDef = {
                 .class_name = "Timeout",
-                .finalizer = timeoutFinalizer,
+                .finalizer = nullptr,
                 .gc_mark = nullptr,
                 .call = nullptr,
                 .exotic = nullptr,
             };
-            if (JS_NewClass(jsRuntime, timeoutClassID, &jsClassDef) < 0) {
+            const int status = JS_NewClass(jsRuntime, timeoutClassID, &jsClassDef);
+            if (status < 0) {
                 JS_ThrowOutOfMemory(jsContext);
                 return nullptr;
             }
         }
 
-        const ScopedJSValue object(jsContext, JS_NewObjectProtoClass(jsContext, JS_NULL, timeoutClassID));
-        if (JS_IsException(object.value)) {
+        ScopedJSValue modulePrivateValue(jsContext, JS_NewObjectProtoClass(jsContext, JS_NULL, timeoutClassID));
+        if (JS_IsException(modulePrivateValue.value)) {
             return nullptr;
         }
-        std::unique_ptr<std::shared_ptr<Timeout>> ownedTimeout = std::make_unique<std::shared_ptr<Timeout>>(timeout);
-        JS_SetOpaque(object.value, ownedTimeout.release());
+        JS_SetOpaque(modulePrivateValue.value, &timeout);
 
         struct FunctionEntry {
             const char* name = nullptr;
-            JSValue (*function)(JSContext*, JSValueConst, int, JSValueConst*, std::shared_ptr<Timeout>) = nullptr;
+            JSValue (*function)(JSContext*, JSValueConst, int, JSValueConst*, Timeout&) = nullptr;
             int argc = 0;
         };
         static const std::vector<FunctionEntry> functionEntries = {
@@ -291,14 +277,13 @@ JSModuleDef* createTimeoutImplModule(JSContext* jsContext, std::shared_ptr<Timeo
             },
         };
         JSModuleDef* jsModuleDef = JS_NewCModule(jsContext, "amj:timeout_impl", [](JSContext* jsContext, JSModuleDef* jsModuleDef) -> int {
-            const ScopedJSValue object(jsContext, JS_GetModulePrivateValue(jsContext, jsModuleDef));
-            if (JS_IsException(object.value)) {
+            const ScopedJSValue modulePrivateValue(jsContext, JS_GetModulePrivateValue(jsContext, jsModuleDef));
+            if (JS_IsException(modulePrivateValue.value)) {
                 return -1;
             }
             const auto functionCallback = [](JSContext* jsContext, JSValueConst thisValue, int argc, JSValueConst* argv, int magic, JSValueConst* functionData) -> JSValue {
-                // QuickJS retains the shared holder and supplies it to each call.
-                const JSValueConst holder = functionData[0];
-                const std::shared_ptr<Timeout>* timeout = static_cast<std::shared_ptr<Timeout>*>(JS_GetOpaque2(jsContext, holder, JS_GetClassID(holder)));
+                // QuickJS retains the JS carrier, which borrows the native Timeout.
+                Timeout* timeout = static_cast<Timeout*>(JS_GetOpaque2(jsContext, functionData[0], JS_GetClassID(functionData[0])));
                 if (timeout == nullptr) {
                     return JS_EXCEPTION;
                 }
@@ -307,11 +292,15 @@ JSModuleDef* createTimeoutImplModule(JSContext* jsContext, std::shared_ptr<Timeo
                 }
                 return functionEntries.at(static_cast<std::size_t>(magic)).function(jsContext, thisValue, argc, argv, *timeout);
             };
-            JSValue functionData = object.value;
+            std::vector<JSValue> functionData = {modulePrivateValue.value};
             for (std::size_t index = 0; index < functionEntries.size(); index++) {
                 const FunctionEntry& timeoutFunction = functionEntries.at(index);
-                const JSValue function = JS_NewCFunctionData(jsContext, functionCallback, timeoutFunction.argc, static_cast<int>(index), 1, &functionData);
-                if (JS_IsException(function) || JS_SetModuleExport(jsContext, jsModuleDef, timeoutFunction.name, function) < 0) {
+                const JSValue function = JS_NewCFunctionData(jsContext, functionCallback, timeoutFunction.argc, static_cast<int>(index), static_cast<int>(functionData.size()), functionData.data());
+                if (JS_IsException(function)) {
+                    return -1;
+                }
+                const int status = JS_SetModuleExport(jsContext, jsModuleDef, timeoutFunction.name, function);
+                if (status < 0) {
                     return -1;
                 }
             }
@@ -320,12 +309,14 @@ JSModuleDef* createTimeoutImplModule(JSContext* jsContext, std::shared_ptr<Timeo
         if (jsModuleDef == nullptr) {
             return nullptr;
         }
-        for (const FunctionEntry& timeoutFunction : functionEntries) {
-            if (JS_AddModuleExport(jsContext, jsModuleDef, timeoutFunction.name) < 0) {
+        for (const FunctionEntry& functionEntry : functionEntries) {
+            const int status = JS_AddModuleExport(jsContext, jsModuleDef, functionEntry.name);
+            if (status < 0) {
                 return nullptr;
             }
         }
-        if (JS_SetModulePrivateValue(jsContext, jsModuleDef, JS_DupValue(jsContext, object.value)) < 0) {
+        const int status = JS_SetModulePrivateValue(jsContext, jsModuleDef, modulePrivateValue.release());
+        if (status < 0) {
             return nullptr;
         }
         return jsModuleDef;

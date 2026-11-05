@@ -31,12 +31,13 @@ are internal, not public constructors.
 
 `createTimeoutImplModule(jsContext, timeout)` registers `amj:timeout_impl`,
 exporting normalized `timeoutSet(callback, delay)` and `timeoutClear(timerID)`
-functions. The host creates one `std::shared_ptr<Timeout>` per scheduler/context
-pair; JS bindings retain shared ownership, and `Timeout` retains a
-`std::shared_ptr<Scheduler>`. Do not copy or modify the state while in use.
-Pending callbacks hold `std::weak_ptr<Timeout>` to avoid a native ownership cycle;
-execution is skipped if the timeout has expired. The hidden JS object's finalizer
-releases its owned smart-pointer holder.
+functions. The enclosing host owns one `Timeout` per scheduler/context pair;
+its `Scheduler*` borrows the scheduler. Native functions accept `Timeout&`, and
+bindings and callbacks retain borrowed `Timeout*` pointers. Keep both objects
+at stable addresses: stop JS calls and clear all callbacks before destroying
+`Timeout`, and destroy the scheduler before freeing its JS context. The hidden
+JS object only carries a borrowed pointer; no native holder allocation or object
+finalizer is needed.
 The C++ header and `.d.ts` describe those same operations. `timeout.js` implements
 the public API: callback validation, numeric coercion, delay clamping/truncation,
 and forwarding up to 256 extra arguments via a closure. C++ defensively validates
@@ -47,14 +48,14 @@ accepts IDs belonging to this state's timers, not unrelated scheduler callbacks.
 Timer IDs wrap from INT32_MAX to 1, skipping active IDs; scheduler IDs never enter
 JS. Clearing the scheduler preserves the timer-ID allocation counter. IDs may be
 reused after wraparound, so a stale timer ID can then refer to a newer timer.
-Scheduler callbacks own retained JS functions through RAII; execution removes the
+Registration and the scheduled lambda share a `TimeoutCallback` through `shared_ptr`.
+It retains the JS function through RAII; execution removes the
 timer ID before invoking JS, and cancellation or scheduler clearing releases both
 the callback and its ID. No active flag or separate cleanup registration is needed.
 After `scheduler.clear()`, the existing state and module remain usable. All use
-and final smart-pointer release must happen on the owner thread. The host must
-clear scheduled work before context teardown, including potential ownership
-cycles through retained JS callbacks. The context must outlive the scheduler and
-retained JS values; native shared ownership does not extend the context's lifetime.
+and destruction must happen on the owner thread. The context must outlive the
+scheduler and retained JS values; borrowed dependencies are guaranteed by the
+host's shutdown ordering, not by automatic lifetime extension.
 
 Register each C++ module once per context before loading its consumers. Check
 for nullptr and a pending JS exception. Module definitions belong to the context,
@@ -141,7 +142,10 @@ TypeScript cannot navigate into C++.
 
 The outer owner loop drains all QuickJS jobs, checks its awaited Promise, then
 calls `scheduler.runNext()` to wait for and execute one native callback. Repeat.
-The scheduler does not execute the QuickJS job queue itself.
+The scheduler does not execute the QuickJS job queue itself. Callback and cleanup
+registration consume `std::move_only_function<errors::Error()>` values; pass named
+move-only callables with `std::move`. Node extraction and map swaps keep callable
+movement and destruction outside the mutex, including registration failure paths.
 
 HTTP workers access native buffers only and call `markReady()`. Their request
 owners remain alive until explicit close or module cleanup. Scheduler callbacks
@@ -156,9 +160,9 @@ or run JS. Callers should cancel/release readers in `finally`. Cancellation/join
 can block on native DNS/connect/OS calls: do not run this host loop on the UI thread.
 
 Clear/destroy the scheduler before freeing the JS context. `clear()` invalidates
-fetch and timer owners. Use a fresh context/module registration to reuse the
-scheduler. URL and text do not depend
-on scheduler lifetime.
+fetch owners, requiring fresh fetch registration/context, but timeout remains
+reusable while its borrowed objects remain alive. URL and text do not depend on
+scheduler lifetime.
 
 The fetch facade remains a subset: HTTP(S), no redirects/cookies/retries,
 string/Uint8Array uploads, `.text()`/`.json()`, and `body.getReader()` streaming.

@@ -69,19 +69,19 @@ Scheduler::~Scheduler() {
     }
 }
 
-std::expected<int64_t, errors::Error> Scheduler::registerCallback(const std::function<errors::Error()>& callback, std::optional<chrono::steady_clock::time_point> triggerTime) {
+std::expected<int64_t, errors::Error> Scheduler::registerCallback(std::move_only_function<errors::Error()> callback, std::optional<chrono::steady_clock::time_point> triggerTime) {
     if (this_thread::get_id() != ownerThreadID) {
         return std::unexpected(errors::message("Scheduler.registerCallback: called outside owner thread"));
     }
-    // Prepare the node before locking: copying captures can execute user code.
-    std::map<int64_t, std::function<errors::Error()>> temporaryMap;
-    temporaryMap.insert_or_assign(0, callback);
-    std::map<int64_t, std::function<errors::Error()>>::node_type mapNode = temporaryMap.extract(0);
+    // Prepare the node before locking: moving captures can execute user code.
+    std::map<int64_t, std::move_only_function<errors::Error()>> temporaryMap;
+    temporaryMap.insert_or_assign(0, std::move(callback));
+    std::map<int64_t, std::move_only_function<errors::Error()>>::node_type mapNode = temporaryMap.extract(0);
     const std::lock_guard<std::mutex> lock(mutex);
     if (clearing) {
         return std::unexpected(errors::message("Scheduler.registerCallback: called inside a clear()"));
     }
-    if (callback == nullptr) {
+    if (mapNode.mapped() == nullptr) {
         return std::unexpected(errors::message("Scheduler.registerCallback: registered a nullptr callback function"));
     }
     if (callbackIDCounter >= std::numeric_limits<int64_t>::max()) {
@@ -93,7 +93,7 @@ std::expected<int64_t, errors::Error> Scheduler::registerCallback(const std::fun
     if (triggerTime.has_value()) {
         triggerTimeMap.insert_or_assign(callbackID, triggerTime.value());
     }
-    // Inserting a prepared node does not allocate or copy the callback.
+    // Inserting a prepared node does not allocate or move the callback.
     callbackMap.insert(std::move(mapNode));
     return callbackID;
 }
@@ -105,10 +105,10 @@ errors::Error Scheduler::unregisterCallback(int64_t callbackID) {
     // Lift the callback out into the parent scope and not the mutex scope so
     // that values captured by the callback don't run their destructors under
     // the mutex scope.
-    std::map<int64_t, std::function<errors::Error()>>::node_type callbackNode;
+    std::map<int64_t, std::move_only_function<errors::Error()>>::node_type mapNode;
     {
         const std::lock_guard<std::mutex> lock(mutex);
-        callbackNode = callbackMap.extract(callbackID);
+        mapNode = callbackMap.extract(callbackID);
         triggerTimeMap.erase(callbackID);
         readyTimeMap.erase(callbackID);
     }
@@ -131,18 +131,18 @@ errors::Error Scheduler::markReady(int64_t callbackID) {
     return {};
 }
 
-std::expected<int64_t, errors::Error> Scheduler::registerCleanup(const std::function<errors::Error()>& cleanup) {
+std::expected<int64_t, errors::Error> Scheduler::registerCleanup(std::move_only_function<errors::Error()> cleanup) {
     if (this_thread::get_id() != ownerThreadID) {
         return std::unexpected(errors::message("Scheduler.registerCleanup: called outside owner thread"));
     }
-    std::map<int64_t, std::function<errors::Error()>> temporaryMap;
-    temporaryMap.insert_or_assign(0, cleanup);
-    std::map<int64_t, std::function<errors::Error()>>::node_type mapNode = temporaryMap.extract(0);
+    std::map<int64_t, std::move_only_function<errors::Error()>> temporaryMap;
+    temporaryMap.insert_or_assign(0, std::move(cleanup));
+    std::map<int64_t, std::move_only_function<errors::Error()>>::node_type mapNode = temporaryMap.extract(0);
     const std::lock_guard<std::mutex> lock(mutex);
     if (clearing) {
         return std::unexpected(errors::message("Scheduler.registerCleanup: called inside a clear()"));
     }
-    if (cleanup == nullptr) {
+    if (mapNode.mapped() == nullptr) {
         return std::unexpected(errors::message("Scheduler.registerCleanup: registered a nullptr cleanup function"));
     }
     if (cleanupIDCounter >= std::numeric_limits<int64_t>::max()) {
@@ -159,7 +159,7 @@ errors::Error Scheduler::cleanup(int64_t cleanupID) {
     if (this_thread::get_id() != ownerThreadID) {
         return errors::message("Scheduler.cleanup: called outside owner thread");
     }
-    std::map<int64_t, std::function<errors::Error()>>::node_type mapNode;
+    std::map<int64_t, std::move_only_function<errors::Error()>>::node_type mapNode;
     {
         const std::lock_guard<std::mutex> lock(mutex);
         mapNode = cleanupMap.extract(cleanupID);
@@ -182,7 +182,7 @@ errors::Error Scheduler::runNext() {
     if (this_thread::get_id() != ownerThreadID) {
         return errors::message("Scheduler.runNext: called outside owner thread");
     }
-    std::map<int64_t, std::function<errors::Error()>>::node_type mapNode;
+    std::map<int64_t, std::move_only_function<errors::Error()>>::node_type mapNode;
     {
         std::unique_lock<std::mutex> lock(mutex);
         if (clearing) {
@@ -200,7 +200,7 @@ errors::Error Scheduler::runNext() {
             }
             int64_t callbackID = 0;
             std::optional<chrono::steady_clock::time_point> timePoint = {};
-            for (const std::pair<const int64_t, std::function<errors::Error()>>& entry : callbackMap) {
+            for (const std::pair<const int64_t, std::move_only_function<errors::Error()>>& entry : callbackMap) {
                 // Check the readyTimeMap.
                 if (readyTimeMap.contains(entry.first)) {
                     const chrono::steady_clock::time_point readyTime = readyTimeMap.at(entry.first);
@@ -249,8 +249,8 @@ errors::Error Scheduler::clear() {
     if (this_thread::get_id() != ownerThreadID) {
         return errors::message("Scheduler.clear: called outside owner thread");
     }
-    std::map<int64_t, std::function<errors::Error()>> temporaryCallbackMap;
-    std::map<int64_t, std::function<errors::Error()>> temporaryCleanupMap;
+    std::map<int64_t, std::move_only_function<errors::Error()>> temporaryCallbackMap;
+    std::map<int64_t, std::move_only_function<errors::Error()>> temporaryCleanupMap;
     {
         // Clear the callback maps under mutex lock without triggering any
         // destructors by swapping temporary empty maps with the current ones.
@@ -270,7 +270,7 @@ errors::Error Scheduler::clear() {
     }
     temporaryCallbackMap.clear();
     errors::Error firstError;
-    for (const std::pair<const int64_t, std::function<errors::Error()>>& entry : temporaryCleanupMap) {
+    for (std::pair<const int64_t, std::move_only_function<errors::Error()>>& entry : temporaryCleanupMap) {
         errors::Error error;
         try {
             error = entry.second();
