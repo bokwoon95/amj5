@@ -82,7 +82,7 @@ JSValue timeoutSet(JSContext* jsContext, JSValueConst /* thisValue */, int argc,
         timer->timeoutState = &timeoutState;
         const std::expected<int64_t, errors::Error> callbackIDResult = timeoutState.scheduler->registerCallback([timer]() -> errors::Error {
             timer->timeoutState->timerIDs.erase(timer->callbackID);
-            const AutoJSValue result(timer->jsContext, JS_Call(timer->jsContext, timer->callback, JS_UNDEFINED, 0, nullptr));
+            const ScopedJSValue result(timer->jsContext, JS_Call(timer->jsContext, timer->callback, JS_UNDEFINED, 0, nullptr));
             if (JS_IsException(result.value)) {
                 return errors::Error{
                     .errorCode = ErrorCode::JSException,
@@ -197,14 +197,14 @@ JSModuleDef* createTimeoutImplModule(JSContext* jsContext, TimeoutState& timeout
                 return nullptr;
             }
         }
-        const AutoJSValue object(jsContext, JS_NewObjectProtoClass(jsContext, JS_NULL, timeoutClassID));
+        const ScopedJSValue object(jsContext, JS_NewObjectProtoClass(jsContext, JS_NULL, timeoutClassID));
         if (JS_IsException(object.value)) {
             return nullptr;
         }
         // The JS object carries a borrowed pointer; it does not own the state.
         JS_SetOpaque(object.value, &timeoutState);
         JSModuleDef* jsModuleDef = JS_NewCModule(jsContext, "amj:timeout_impl", [](JSContext* jsContext, JSModuleDef* jsModuleDef) -> int {
-            const AutoJSValue object(jsContext, JS_GetModulePrivateValue(jsContext, jsModuleDef));
+            const ScopedJSValue object(jsContext, JS_GetModulePrivateValue(jsContext, jsModuleDef));
             if (JS_IsException(object.value)) {
                 return -1;
             }

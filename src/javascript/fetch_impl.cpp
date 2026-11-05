@@ -354,7 +354,7 @@ errors::Error deliver(const std::shared_ptr<FetchRequestState>& fetchRequestStat
     }
     fetchRequestState->transport->condition.notify_all();
     JSContext* jsContext = fetchRequestState->jsContext;
-    AutoJSValue callback(jsContext, undefinedValue);
+    ScopedJSValue callback(jsContext, undefinedValue);
     if (reading) {
         fetchRequestState->readID = 0;
         callback.value = std::exchange(fetchRequestState->onRead, undefinedValue);
@@ -366,8 +366,8 @@ errors::Error deliver(const std::shared_ptr<FetchRequestState>& fetchRequestStat
     if (JS_IsUndefined(callback.value)) {
         return {};
     }
-    AutoJSValue failureValue(jsContext, nullValue);
-    AutoJSValue data(jsContext, nullValue);
+    ScopedJSValue failureValue(jsContext, nullValue);
+    ScopedJSValue data(jsContext, nullValue);
     if (failure.has_value()) {
         failureValue.value = JS_NewObjectProto(jsContext, nullValue);
         if (!JS_IsException(failureValue.value)) {
@@ -379,7 +379,7 @@ errors::Error deliver(const std::shared_ptr<FetchRequestState>& fetchRequestStat
             }
         }
     } else if (reading && !done) {
-        const AutoJSValue buffer(jsContext, JS_NewArrayBufferCopy(jsContext, chunk.data(), chunk.size()));
+        const ScopedJSValue buffer(jsContext, JS_NewArrayBufferCopy(jsContext, chunk.data(), chunk.size()));
         if (!JS_IsException(buffer.value)) {
             // QuickJS-NG's public helper reads offset/length slots even with argc=1.
             std::array<JSValue, 3> arguments = {buffer.value, undefinedValue, undefinedValue};
@@ -387,11 +387,11 @@ errors::Error deliver(const std::shared_ptr<FetchRequestState>& fetchRequestStat
         }
     } else if (!reading) {
         data.value = JS_NewObjectProto(jsContext, nullValue);
-        AutoJSValue pairs(jsContext, JS_NewArray(jsContext));
+        ScopedJSValue pairs(jsContext, JS_NewArray(jsContext));
         if (!JS_IsException(data.value) && !JS_IsException(pairs.value)) {
             uint32_t index = 0;
             for (const std::pair<std::string, std::string>& header : metadata.headers) {
-                AutoJSValue pair(jsContext, JS_NewArray(jsContext));
+                ScopedJSValue pair(jsContext, JS_NewArray(jsContext));
                 if (JS_IsException(pair.value)) {
                     break;
                 }
@@ -420,7 +420,7 @@ errors::Error deliver(const std::shared_ptr<FetchRequestState>& fetchRequestStat
         };
     }
     std::array<JSValue, 2> arguments = {failureValue.value, data.value};
-    const AutoJSValue result(jsContext, JS_Call(jsContext, callback.value, undefinedValue, static_cast<int>(arguments.size()), arguments.data()));
+    const ScopedJSValue result(jsContext, JS_Call(jsContext, callback.value, undefinedValue, static_cast<int>(arguments.size()), arguments.data()));
     if (JS_IsException(result.value)) {
         return errors::Error{
             .errorCode = ErrorCode::JSException,
@@ -524,7 +524,7 @@ JSValue FetchImpl::start(JSContext* jsContext, JSValueConst url, JSValueConst me
     }
     std::size_t headerBytes = 0;
     for (int64_t index = 0; index < count; index++) {
-        const AutoJSValue pair(jsContext, JS_GetPropertyUint32(jsContext, headerPairs, static_cast<uint32_t>(index)));
+        const ScopedJSValue pair(jsContext, JS_GetPropertyUint32(jsContext, headerPairs, static_cast<uint32_t>(index)));
         if (JS_IsException(pair.value)) {
             return exceptionValue;
         }
@@ -538,8 +538,8 @@ JSValue FetchImpl::start(JSContext* jsContext, JSValueConst url, JSValueConst me
         if (length != 2) {
             return JS_ThrowTypeError(jsContext, "Expected two fields per header pair");
         }
-        const AutoJSValue name(jsContext, JS_GetPropertyUint32(jsContext, pair.value, 0));
-        const AutoJSValue value(jsContext, JS_GetPropertyUint32(jsContext, pair.value, 1));
+        const ScopedJSValue name(jsContext, JS_GetPropertyUint32(jsContext, pair.value, 0));
+        const ScopedJSValue value(jsContext, JS_GetPropertyUint32(jsContext, pair.value, 1));
         if (JS_IsException(name.value) || JS_IsException(value.value)) {
             return exceptionValue;
         }
@@ -589,7 +589,7 @@ JSValue FetchImpl::start(JSContext* jsContext, JSValueConst url, JSValueConst me
     std::size_t offset = 0;
     std::size_t length = 0;
     std::size_t elementSize = 0;
-    const AutoJSValue buffer(jsContext, JS_GetTypedArrayBuffer(jsContext, bytes, &offset, &length, &elementSize));
+    const ScopedJSValue buffer(jsContext, JS_GetTypedArrayBuffer(jsContext, bytes, &offset, &length, &elementSize));
     if (JS_IsException(buffer.value)) {
         return exceptionValue;
     }
@@ -634,7 +634,7 @@ JSValue FetchImpl::start(JSContext* jsContext, JSValueConst url, JSValueConst me
     client.set_decompress(true);
     client.enable_server_certificate_verification(true);
     client.enable_server_hostname_verification(true);
-    const AutoJSValue handle(jsContext, JS_NewObjectProtoClass(jsContext, nullValue, getClassID(JS_GetRuntime(jsContext))));
+    const ScopedJSValue handle(jsContext, JS_NewObjectProtoClass(jsContext, nullValue, getClassID(JS_GetRuntime(jsContext))));
     if (JS_IsException(handle.value)) {
         return exceptionValue;
     }
@@ -796,7 +796,7 @@ JSModuleDef* FetchImpl::createModule(JSContext* jsContext, Scheduler& scheduler)
     std::unique_ptr<FetchHandle> fetchHandle = std::make_unique<FetchHandle>();
     fetchHandle->fetchImpl = std::make_unique<FetchImpl>();
     fetchHandle->fetchImpl->fetchImplState = fetchImplState;
-    AutoJSValue object(jsContext, JS_NewObjectProtoClass(jsContext, nullValue, classID));
+    ScopedJSValue object(jsContext, JS_NewObjectProtoClass(jsContext, nullValue, classID));
     if (JS_IsException(object.value)) {
         return nullptr;
     }

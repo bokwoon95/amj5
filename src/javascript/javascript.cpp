@@ -47,7 +47,7 @@ JSValue convertJSON(JSContext* jsContext, const JSONValue& jsonValue, int depth)
         if (array->size() > std::numeric_limits<uint32_t>::max()) {
             return JS_ThrowRangeError(jsContext, "JSON array exceeds the JS array length limit");
         }
-        AutoJSValue result(jsContext, JS_NewArray(jsContext));
+        ScopedJSValue result(jsContext, JS_NewArray(jsContext));
         if (JS_IsException(result.value)) {
             return JS_EXCEPTION;
         }
@@ -64,12 +64,12 @@ JSValue convertJSON(JSContext* jsContext, const JSONValue& jsonValue, int depth)
     }
     const std::map<std::string, JSONValue>* object = std::get_if<std::map<std::string, JSONValue>>(&jsonValue.value);
     if (object != nullptr) {
-        AutoJSValue result(jsContext, JS_NewObjectProto(jsContext, JS_NULL));
+        ScopedJSValue result(jsContext, JS_NewObjectProto(jsContext, JS_NULL));
         if (JS_IsException(result.value)) {
             return JS_EXCEPTION;
         }
         for (const std::pair<const std::string, JSONValue>& field : *object) {
-            AutoJSValue element(jsContext, convertJSON(jsContext, field.second, depth + 1));
+            ScopedJSValue element(jsContext, convertJSON(jsContext, field.second, depth + 1));
             if (JS_IsException(element.value)) {
                 return JS_EXCEPTION;
             }
@@ -113,7 +113,7 @@ std::optional<std::string> jsstring(JSContext* jsContext, JSValueConst value) {
     return std::string(text, length);
 }
 
-bool setstringfield(const AutoJSValue& obj, const char* key, std::string_view value) {
+bool setstringfield(const ScopedJSValue& obj, const char* key, std::string_view value) {
     const JSValue text = JS_NewStringLen(obj.jsContext, value.data(), value.size());
     if (JS_IsException(text)) {
         return false;
