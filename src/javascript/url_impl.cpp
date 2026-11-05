@@ -362,19 +362,19 @@ JSValue queryStringify(JSContext* jsContext, JSValueConst /* thisValue */, int a
 
 JSModuleDef* createURLImplModule(JSContext* jsContext) {
     try {
-        static const std::vector<JSCFunctionListEntry> functionListEntries = {
+        static const std::vector<JSCFunctionListEntry> functionList = {
             JS_CFUNC_DEF("urlParse", 1, urlParse),
             JS_CFUNC_DEF("urlWithComponent", 3, urlWithComponent),
             JS_CFUNC_DEF("queryStringParse", 1, queryStringParse),
             JS_CFUNC_DEF("queryStringify", 1, queryStringify),
         };
         JSModuleDef* jsModuleDef = JS_NewCModule(jsContext, "amj:url_impl", [](JSContext* jsContext, JSModuleDef* jsModuleDef) -> int {
-            return JS_SetModuleExportList(jsContext, jsModuleDef, functionListEntries.data(), static_cast<int>(functionListEntries.size()));
+            return JS_SetModuleExportList(jsContext, jsModuleDef, functionList.data(), static_cast<int>(functionList.size()));
         });
         if (jsModuleDef == nullptr) {
             return nullptr;
         }
-        if (JS_AddModuleExportList(jsContext, jsModuleDef, functionListEntries.data(), static_cast<int>(functionListEntries.size())) < 0) {
+        if (JS_AddModuleExportList(jsContext, jsModuleDef, functionList.data(), static_cast<int>(functionList.size())) < 0) {
             return nullptr;
         }
         return jsModuleDef;
