@@ -73,6 +73,10 @@ std::expected<int64_t, errors::Error> Scheduler::registerCallback(const std::fun
     if (this_thread::get_id() != ownerThreadID) {
         return std::unexpected(errors::message("called registerCallback() outside owner thread"));
     }
+    // Prepare the node before locking: copying captures can execute user code.
+    std::map<int64_t, std::function<errors::Error()>> temporaryMap;
+    temporaryMap.insert_or_assign(0, callback);
+    std::map<int64_t, std::function<errors::Error()>>::node_type mapNode = temporaryMap.extract(0);
     const std::lock_guard<std::mutex> lock(mutex);
     if (clearing) {
         return std::unexpected(errors::message("called registerCallback() inside a clear()"));
@@ -85,10 +89,12 @@ std::expected<int64_t, errors::Error> Scheduler::registerCallback(const std::fun
     }
     callbackIDCounter++;
     const int64_t callbackID = callbackIDCounter;
-    callbackMap.insert_or_assign(callbackID, callback);
+    mapNode.key() = callbackID;
     if (triggerTime.has_value()) {
         triggerTimeMap.insert_or_assign(callbackID, triggerTime.value());
     }
+    // Inserting a prepared node does not allocate or copy the callback.
+    callbackMap.insert(std::move(mapNode));
     return callbackID;
 }
 
@@ -96,10 +102,17 @@ errors::Error Scheduler::unregisterCallback(int64_t callbackID) {
     if (this_thread::get_id() != ownerThreadID) {
         return errors::message("called unregisterCallback() outside owner thread");
     }
-    const std::lock_guard<std::mutex> lock(mutex);
-    callbackMap.erase(callbackID);
-    triggerTimeMap.erase(callbackID);
-    readyTimeMap.erase(callbackID);
+    // Lift the callback out into the parent scope and not the mutex scope so
+    // that values captured by the callback don't run their destructors under
+    // the mutex scope.
+    std::map<int64_t, std::function<errors::Error()>>::node_type callbackNode;
+    {
+        const std::lock_guard<std::mutex> lock(mutex);
+        callbackNode = callbackMap.extract(callbackID);
+        triggerTimeMap.erase(callbackID);
+        readyTimeMap.erase(callbackID);
+    }
+    // Destroy captures only after unlocking.
     return {};
 }
 
@@ -122,6 +135,9 @@ std::expected<int64_t, errors::Error> Scheduler::registerCleanup(const std::func
     if (this_thread::get_id() != ownerThreadID) {
         return std::unexpected(errors::message("called registerCleanup() outside owner thread"));
     }
+    std::map<int64_t, std::function<errors::Error()>> temporaryMap;
+    temporaryMap.insert_or_assign(0, cleanup);
+    std::map<int64_t, std::function<errors::Error()>>::node_type mapNode = temporaryMap.extract(0);
     const std::lock_guard<std::mutex> lock(mutex);
     if (clearing) {
         return std::unexpected(errors::message("called registerCleanup() inside a clear()"));
@@ -134,7 +150,8 @@ std::expected<int64_t, errors::Error> Scheduler::registerCleanup(const std::func
     }
     cleanupIDCounter++;
     const int64_t cleanupID = cleanupIDCounter;
-    cleanupMap.insert_or_assign(cleanupID, cleanup);
+    mapNode.key() = cleanupID;
+    cleanupMap.insert(std::move(mapNode));
     return cleanupID;
 }
 
@@ -142,18 +159,17 @@ errors::Error Scheduler::cleanup(int64_t cleanupID) {
     if (this_thread::get_id() != ownerThreadID) {
         return errors::message("called cleanup() outside owner thread");
     }
-    std::function<errors::Error()> cleanup = {};
+    std::map<int64_t, std::function<errors::Error()>>::node_type mapNode;
     {
         const std::lock_guard<std::mutex> lock(mutex);
-        if (!cleanupMap.contains(cleanupID)) {
-            return {};
-        }
-        cleanup = cleanupMap.at(cleanupID);
-        cleanupMap.erase(cleanupID);
+        mapNode = cleanupMap.extract(cleanupID);
+    }
+    if (mapNode.empty()) {
+        return {};
     }
     errors::Error error;
     try {
-        error = cleanup();
+        error = mapNode.mapped()();
     } catch (const std::exception& exception) {
         error = errors::message(std::string("Cleanup threw a C++ exception: ") + exception.what());
     } catch (...) {
@@ -166,7 +182,7 @@ errors::Error Scheduler::runNext() {
     if (this_thread::get_id() != ownerThreadID) {
         return errors::message("called runNext() outside owner thread");
     }
-    std::function<errors::Error()> callback = {};
+    std::map<int64_t, std::function<errors::Error()>>::node_type mapNode;
     {
         std::unique_lock<std::mutex> lock(mutex);
         if (clearing) {
@@ -204,8 +220,7 @@ errors::Error Scheduler::runNext() {
             }
             if (timePoint.has_value()) {
                 if (timePoint.value() <= chrono::steady_clock::now()) {
-                    callback = callbackMap.at(callbackID);
-                    callbackMap.erase(callbackID);
+                    mapNode = callbackMap.extract(callbackID);
                     triggerTimeMap.erase(callbackID);
                     readyTimeMap.erase(callbackID);
                     break;
@@ -218,7 +233,7 @@ errors::Error Scheduler::runNext() {
     }
     errors::Error error = {};
     try {
-        error = callback();
+        error = mapNode.mapped()();
     } catch (const std::exception& exception) {
         error = errors::message(std::string("Callback threw a C++ exception: ") + exception.what());
     } catch (...) {
@@ -234,20 +249,28 @@ errors::Error Scheduler::clear() {
     if (this_thread::get_id() != ownerThreadID) {
         return errors::message("Clear requires the owner thread");
     }
-    std::map<int64_t, std::function<errors::Error()>> pendingCleanupMap;
+    std::map<int64_t, std::function<errors::Error()>> temporaryCallbackMap;
+    std::map<int64_t, std::function<errors::Error()>> temporaryCleanupMap;
     {
+        // Clear the callback maps under mutex lock without triggering any
+        // destructors by swapping temporary empty maps with the current ones.
+        // So other callers of callbackMap and cleanupMap will see it as empty
+        // (same effect as clear()) while the actual maps are now owned in this
+        // function's scope and can be destroyed safely outside the mutex lock
+        // on function return.
         const std::lock_guard<std::mutex> lock(mutex);
         if (clearing) {
             return {};
         }
         clearing = true;
-        callbackMap.clear();
+        temporaryCallbackMap.swap(callbackMap);
         triggerTimeMap.clear();
         readyTimeMap.clear();
-        pendingCleanupMap.swap(cleanupMap);
+        temporaryCleanupMap.swap(cleanupMap);
     }
+    temporaryCallbackMap.clear();
     errors::Error firstError;
-    for (const std::pair<const int64_t, std::function<errors::Error()>>& entry : pendingCleanupMap) {
+    for (const std::pair<const int64_t, std::function<errors::Error()>>& entry : temporaryCleanupMap) {
         errors::Error error;
         try {
             error = entry.second();
@@ -260,7 +283,7 @@ errors::Error Scheduler::clear() {
             firstError = error;
         }
     }
-    pendingCleanupMap.clear();
+    temporaryCleanupMap.clear();
     {
         const std::lock_guard<std::mutex> lock(mutex);
         clearing = false;
