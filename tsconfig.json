@@ -24,6 +24,6 @@
     "src/javascript/timeout_impl.d.ts",
     "src/javascript/fetch_impl.d.ts"
   ],
-  "include": ["**/*.js"],
+  "include": ["src"],
   "exclude": ["build", "dist", "vcpkg_installed", "node_modules", ".venv"]
 }

@@ -22,7 +22,9 @@ export function setTimeout(callback, delay = 0, ...args) {
     delayMs = 2147483647;
   }
   delayMs = Math.trunc(delayMs);
-  const timerID = timeoutSet(function() { callback(...args) }, delayMs);
+  const timerID = timeoutSet(function () {
+    callback(...args);
+  }, delayMs);
   return timerID;
 }
 

@@ -107,9 +107,13 @@ export class URLSearchParams {
     }
   }
 
-  get [Symbol.toStringTag]() { return "URLSearchParams"; }
+  get [Symbol.toStringTag]() {
+    return "URLSearchParams";
+  }
 
-  get size() { return this.#entries.length; }
+  get size() {
+    return this.#entries.length;
+  }
 
   [Symbol.iterator]() {
     return this.entries();
@@ -403,41 +407,87 @@ export class URL {
     this.#href = href;
   }
 
-  get [Symbol.toStringTag]() { return "URL"; }
+  get [Symbol.toStringTag]() {
+    return "URL";
+  }
 
-  get hash() { return this.#getURLParts().hash; }
-  set hash(value) { this.#setComponent("hash", value); }
+  get hash() {
+    return this.#getURLParts().hash;
+  }
+  set hash(value) {
+    this.#setComponent("hash", value);
+  }
 
-  get host() { return this.#getURLParts().host; }
-  set host(value) { this.#setComponent("host", value); }
+  get host() {
+    return this.#getURLParts().host;
+  }
+  set host(value) {
+    this.#setComponent("host", value);
+  }
 
-  get hostname() { return this.#getURLParts().hostname; }
-  set hostname(value) { this.#setComponent("hostname", value); }
+  get hostname() {
+    return this.#getURLParts().hostname;
+  }
+  set hostname(value) {
+    this.#setComponent("hostname", value);
+  }
 
-  get href() { return this.#getURLParts().href; }
-  set href(value) { this.#setComponent("href", value); }
+  get href() {
+    return this.#getURLParts().href;
+  }
+  set href(value) {
+    this.#setComponent("href", value);
+  }
 
-  get origin() { return this.#getURLParts().origin; }
+  get origin() {
+    return this.#getURLParts().origin;
+  }
 
-  get password() { return this.#getURLParts().password; }
-  set password(value) { this.#setComponent("password", value); }
+  get password() {
+    return this.#getURLParts().password;
+  }
+  set password(value) {
+    this.#setComponent("password", value);
+  }
 
-  get pathname() { return this.#getURLParts().pathname; }
-  set pathname(value) { this.#setComponent("pathname", value); }
+  get pathname() {
+    return this.#getURLParts().pathname;
+  }
+  set pathname(value) {
+    this.#setComponent("pathname", value);
+  }
 
-  get port() { return this.#getURLParts().port; }
-  set port(value) { this.#setComponent("port", value); }
+  get port() {
+    return this.#getURLParts().port;
+  }
+  set port(value) {
+    this.#setComponent("port", value);
+  }
 
-  get protocol() { return this.#getURLParts().protocol; }
-  set protocol(value) { this.#setComponent("protocol", value); }
+  get protocol() {
+    return this.#getURLParts().protocol;
+  }
+  set protocol(value) {
+    this.#setComponent("protocol", value);
+  }
 
-  get search() { return this.#getURLParts().search; }
-  set search(value) { this.#setComponent("search", value); }
+  get search() {
+    return this.#getURLParts().search;
+  }
+  set search(value) {
+    this.#setComponent("search", value);
+  }
 
-  get searchParams() { return this.#urlSearchParams; }
+  get searchParams() {
+    return this.#urlSearchParams;
+  }
 
-  get username() { return this.#getURLParts().username; }
-  set username(value) { this.#setComponent("username", value); }
+  get username() {
+    return this.#getURLParts().username;
+  }
+  set username(value) {
+    this.#setComponent("username", value);
+  }
 
   /**
    * @param {unknown} input
