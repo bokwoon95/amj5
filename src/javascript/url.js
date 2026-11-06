@@ -414,6 +414,7 @@ export class URL {
   get hash() {
     return this.#getURLParts().hash;
   }
+
   set hash(value) {
     this.#setComponent("hash", value);
   }
@@ -421,6 +422,7 @@ export class URL {
   get host() {
     return this.#getURLParts().host;
   }
+
   set host(value) {
     this.#setComponent("host", value);
   }
@@ -428,6 +430,7 @@ export class URL {
   get hostname() {
     return this.#getURLParts().hostname;
   }
+
   set hostname(value) {
     this.#setComponent("hostname", value);
   }
@@ -435,6 +438,7 @@ export class URL {
   get href() {
     return this.#getURLParts().href;
   }
+
   set href(value) {
     this.#setComponent("href", value);
   }
@@ -446,6 +450,7 @@ export class URL {
   get password() {
     return this.#getURLParts().password;
   }
+
   set password(value) {
     this.#setComponent("password", value);
   }
@@ -453,6 +458,7 @@ export class URL {
   get pathname() {
     return this.#getURLParts().pathname;
   }
+
   set pathname(value) {
     this.#setComponent("pathname", value);
   }
@@ -460,6 +466,7 @@ export class URL {
   get port() {
     return this.#getURLParts().port;
   }
+
   set port(value) {
     this.#setComponent("port", value);
   }
@@ -467,6 +474,7 @@ export class URL {
   get protocol() {
     return this.#getURLParts().protocol;
   }
+
   set protocol(value) {
     this.#setComponent("protocol", value);
   }
@@ -474,6 +482,7 @@ export class URL {
   get search() {
     return this.#getURLParts().search;
   }
+
   set search(value) {
     this.#setComponent("search", value);
   }
@@ -485,6 +494,7 @@ export class URL {
   get username() {
     return this.#getURLParts().username;
   }
+
   set username(value) {
     this.#setComponent("username", value);
   }
